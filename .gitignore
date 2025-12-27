@@ -3,4 +3,4 @@ out
 dist
 *.vsix
 .vscode-test
-.vscode-test.*
+.vscode-test.*.log
