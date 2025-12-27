@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// Import JSCAD modeling at module level to avoid repeated require() calls
+const modeling = require('@jscad/modeling');
+const { geom2, geom3, path2 } = modeling.geometries;
+
 export interface JscadEntrypoint {
     filePath: string;
     source: 'package.json' | 'index.jscad' | 'active-editor';
@@ -118,9 +122,6 @@ export async function executeJscadFile(filePath: string, outputChannel: vscode.O
  * Serializes JSCAD geometry into a format suitable for the webview renderer
  */
 async function serializeGeometry(geometry: any, outputChannel: vscode.OutputChannel): Promise<GeometryData[]> {
-    const modeling = require('@jscad/modeling');
-    const { geom2, geom3, path2 } = modeling.geometries;
-
     outputChannel.appendLine(`Serializing geometry...`);
 
     // Ensure geometry is an array

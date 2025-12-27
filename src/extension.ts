@@ -252,6 +252,7 @@ function getWebviewContent(): string {
 		
 		let gl = null;
 		let currentGeometry = null;
+		let geometryBuffers = []; // Track buffers for cleanup
 		let camera = {
 			position: [0, 0, 50],
 			target: [0, 0, 0],
@@ -359,6 +360,9 @@ function getWebviewContent(): string {
 		function renderGeometry(geometryData) {
 			if (!gl || !programInfo) return;
 			
+			// Clean up old buffers before creating new ones
+			cleanupBuffers();
+			
 			currentGeometry = geometryData;
 			
 			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -374,6 +378,16 @@ function getWebviewContent(): string {
 			statusElement.textContent = 'Status: Geometry rendered';
 		}
 
+		function cleanupBuffers() {
+			// Delete all tracked buffers to prevent memory leaks
+			for (const buffer of geometryBuffers) {
+				if (buffer) {
+					gl.deleteBuffer(buffer);
+				}
+			}
+			geometryBuffers = [];
+		}
+
 		function renderGeom3(geom) {
 			// Flatten positions array
 			const positions = new Float32Array(geom.positions.flat());
@@ -381,10 +395,12 @@ function getWebviewContent(): string {
 			
 			// Create buffers
 			const positionBuffer = gl.createBuffer();
+			geometryBuffers.push(positionBuffer); // Track for cleanup
 			gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 			gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 			
 			const indexBuffer = gl.createBuffer();
+			geometryBuffers.push(indexBuffer); // Track for cleanup
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 			
