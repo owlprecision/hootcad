@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
     - uses: actions/checkout@v4
@@ -32,9 +34,12 @@ jobs:
       run: npm run compile-tests
     
     - name: Run tests
-      uses: coactions/setup-xvfb@v1
-      with:
-        run: npm test
+      run: xvfb-run -a npm test
+      if: runner.os == 'Linux'
+    
+    - name: Run tests
+      run: npm test
+      if: runner.os != 'Linux'
     
     - name: Package extension
       run: npm run package:vsix
