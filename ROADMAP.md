@@ -33,7 +33,7 @@ This phase is about correctness and trust: if the core doesn't run predictably, 
 
 **Goal:** Make parametric models usable and explorable.
 
-**Status:** 🔄 Planned
+**Status:** 🚧 Work in Progress
 
 - Implement parameter discovery (`getParameterDefinitions`)
 - Build parameter editing UI
