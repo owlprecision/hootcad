@@ -271,12 +271,26 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 		let renderer = null;
 		let currentEntities = [];
 
+		function resizeCanvasToDisplaySize() {
+			const container = canvas.parentElement;
+			const dpr = window.devicePixelRatio || 1;
+			const displayWidth = Math.max(1, Math.floor(container.clientWidth * dpr));
+			const displayHeight = Math.max(1, Math.floor(container.clientHeight * dpr));
+			const needsResize = canvas.width !== displayWidth || canvas.height !== displayHeight;
+			if (needsResize) {
+				canvas.width = displayWidth;
+				canvas.height = displayHeight;
+				// Keep CSS size in layout pixels.
+				canvas.style.width = container.clientWidth + 'px';
+				canvas.style.height = container.clientHeight + 'px';
+			}
+			return { width: canvas.width, height: canvas.height, dpr, needsResize };
+		}
+
 		// Initialize the JSCAD renderer
 		function initRenderer() {
 			try {
-				const container = canvas.parentElement;
-				canvas.width = container.clientWidth;
-				canvas.height = container.clientHeight;
+				const size = resizeCanvasToDisplaySize();
 
 				// Initialize the official JSCAD regl-renderer
 				const { prepareRender, cameras, controls } = jscadReglRenderer;
@@ -287,8 +301,8 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 				
 				// Update camera projection for canvas size
 				camera = perspectiveCamera.setProjection(camera, camera, {
-					width: canvas.width,
-					height: canvas.height
+					width: size.width,
+					height: size.height
 				});
 				
 				// Update camera view matrix
@@ -423,6 +437,8 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 					camera: renderer.camera,
 					drawCommands: renderer.drawCommands,
 					entities: [
+						// User entities first (avoid helper state leaking into mesh draws)
+						...currentEntities,
 						// Grid for reference
 						{
 							visuals: { drawCmd: 'drawGrid', show: true },
@@ -433,9 +449,7 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						{
 							visuals: { drawCmd: 'drawAxis', show: true },
 							size: 50
-						},
-						// User entities
-						...currentEntities
+						}
 					]
 				});
 				
@@ -473,14 +487,32 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 				// NOTE: @jscad/regl-renderer drawMesh forces element type to uint16.
 				// Passing a Uint32Array here will corrupt indices (bytes interpreted as uint16),
 				// producing the "spiky"/random-triangle artifacts we've been seeing.
-				const processedEntities = entities.map((entity) => {
+				const processedEntities = entities.map((entity, entityIndex) => {
+					// IMPORTANT: drop any incoming cacheId.
+					// prepareRender() caches draw commands by visuals.cacheId, and the draw command
+					// captures geometry buffers at creation time. If multiple entities share a cacheId,
+					// they will incorrectly reuse buffers, producing "random" triangles / white blocks.
+					const visuals = Object.assign({}, entity.visuals);
+					delete visuals.cacheId;
 					const processed = {
-						visuals: entity.visuals,
+						visuals,
 						geometry: {
 							type: entity.geometry.type,
 							isTransparent: entity.geometry.isTransparent
+						},
+						// Ensure drawMesh doesn't inherit GL state (blend/polygonOffset/etc)
+						// from previously drawn helpers like the grid.
+						extras: {
+							blend: { enable: false },
+							polygonOffset: { enable: false },
+							depth: { enable: true }
 						}
 					};
+
+					// Help renderer sort transparent entities correctly.
+					if (processed.geometry.isTransparent) {
+						processed.visuals.transparent = true;
+					}
 					
 					// Flatten nested arrays and convert to typed arrays
 					if (entity.geometry.positions) {
@@ -546,11 +578,57 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						processed.geometry.points = new Float32Array(entity.geometry.points);
 					}
 					
+					// Validate attribute lengths to avoid shaders reading garbage.
+					// Garbage in normals/colors often shows up as "white blocks" or blown-out lighting.
+					const positionsTA = processed.geometry.positions;
+					if (positionsTA && positionsTA.length > 0) {
+						const vertexCount = Math.floor(positionsTA.length / 3);
+						const expectedNormals = vertexCount * 3;
+						const expectedColors = vertexCount * 4;
+
+						if (processed.geometry.normals && processed.geometry.normals.length !== expectedNormals) {
+							console.warn('Normals length mismatch; replacing normals.', {
+								entityIndex,
+								got: processed.geometry.normals.length,
+								expected: expectedNormals
+							});
+							const fallbackNormals = new Float32Array(expectedNormals);
+							for (let i = 0; i < expectedNormals; i += 3) {
+								fallbackNormals[i] = 0;
+								fallbackNormals[i + 1] = 0;
+								fallbackNormals[i + 2] = 1;
+							}
+							processed.geometry.normals = fallbackNormals;
+						}
+
+						if (processed.geometry.colors && processed.geometry.colors.length !== expectedColors) {
+							console.warn('Colors length mismatch; disabling vertex colors for entity.', {
+								entityIndex,
+								got: processed.geometry.colors.length,
+								expected: expectedColors
+							});
+							delete processed.geometry.colors;
+							processed.visuals.useVertexColors = false;
+							// Prefer any existing visuals.color, else a neutral gray.
+							if (!processed.visuals.color) {
+								processed.visuals.color = [0.7, 0.7, 0.7, 1.0];
+							}
+						}
+					}
+
 					return processed;
 				});
 				
 				// Store entities for re-rendering on resize
 				currentEntities = processedEntities;
+
+				// Debug: show visuals (and ensure cacheId is not present)
+				try {
+					console.log('Current entities visuals:', currentEntities.map(e => e.visuals));
+					console.log('Current entities cacheIds:', currentEntities.map(e => e.visuals && e.visuals.cacheId));
+				} catch (e) {
+					// ignore logging failures
+				}
 
 				// Auto-zoom to fit the geometry
 				autoZoomToFit(processedEntities);
@@ -559,7 +637,7 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 				renderScene();
 				
 				loadingElement.style.display = 'none';
-				statusElement.textContent = \`Status: Rendered \${entities.length} entit\${entities.length === 1 ? 'y' : 'ies'}\`;
+				statusElement.textContent = 'Status: Rendered ' + entities.length + ' entit' + (entities.length === 1 ? 'y' : 'ies');
 			} catch (error) {
 				showError('Rendering failed: ' + error.message);
 			}
@@ -629,15 +707,13 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 		// Handle window resize
 		window.addEventListener('resize', () => {
 			if (renderer) {
-				const container = canvas.parentElement;
-				canvas.width = container.clientWidth;
-				canvas.height = container.clientHeight;
+				const size = resizeCanvasToDisplaySize();
 				
 				// Update camera projection with new canvas size - merge results
 				const updated = renderer.perspectiveCamera.setProjection(
 					renderer.camera,
 					renderer.camera,
-					{ width: canvas.width, height: canvas.height }
+					{ width: size.width, height: size.height }
 				);
 				renderer.camera = Object.assign({}, renderer.camera, updated);
 				
