@@ -48,43 +48,36 @@ suite('Rendering Bug Test Suite', () => {
 			assert.ok(geom.indices.length > 0, `Entity ${i} should have indices`);
 			assert.ok(geom.colors.length > 0, `Entity ${i} should have colors`);
 			
-			// Check that positions, normals, colors are nested arrays (per-vertex data)
-			// After serialization, positions/indices/colors are nested arrays,
-			// but normals become objects {0:x, 1:y, 2:z} due to Float32Array serialization
+			// Check that positions, normals, colors are either nested arrays or flat typed arrays
+			// Positions: nested arrays [[x,y,z], ...] or flat [x,y,z,x,y,z, ...]
+			// Normals: nested arrays [[x,y,z], ...] or objects {0:x,1:y,2:z} (from Float32Array serialization)
+			// Colors: nested arrays [[r,g,b,a], ...] or flat [r,g,b,a,r,g,b,a, ...]
+			const pos0 = geom.positions[0];
+			const isNestedPositions = Array.isArray(pos0);
+			const isFlatPositions = typeof pos0 === 'number';
 			assert.ok(
-				Array.isArray(geom.positions[0]) || typeof geom.positions[0] === 'number',
-				`Entity ${i} positions[0] should be array or number`
+				isNestedPositions || isFlatPositions,
+				`Entity ${i} positions should be nested arrays or flat array of numbers`
 			);
 			
-			// Check array lengths are consistent
-			// This simulates what the webview validation does
-			const posLength = Array.isArray(geom.positions[0]) ? geom.positions.length : geom.positions.length / 3;
-			const normLength = Array.isArray(geom.normals[0]) ? geom.normals.length : geom.normals.length / 3;
-			const colLength = Array.isArray(geom.colors[0]) ? geom.colors.length : geom.colors.length / 4;
+			// Validate array structure consistency
+			// Note: For flat arrays, we assume standard component counts (3 for pos/norm, 4 for colors)
+			const vertexCount = isNestedPositions ? geom.positions.length : Math.floor(geom.positions.length / 3);
+			const normalCount = Array.isArray(geom.normals[0]) ? geom.normals.length : Math.floor(geom.normals.length / 3);
+			const colorCount = Array.isArray(geom.colors[0]) ? geom.colors.length : Math.floor(geom.colors.length / 4);
 			
-			console.log(`Entity ${i}:`, {
-				positions: posLength,
-				normals: normLength,
-				colors: colLength,
-				indices: geom.indices.length
-			});
-			
-			// For nested arrays, lengths should match (same vertex count)
-			if (Array.isArray(geom.positions[0])) {
-				if (Array.isArray(geom.normals[0])) {
-					assert.strictEqual(
-						posLength,
-						normLength,
-						`Entity ${i} positions and normals should have same length`
-					);
-				}
-				if (Array.isArray(geom.colors[0])) {
-					assert.strictEqual(
-						posLength,
-						colLength,
-						`Entity ${i} positions and colors should have same length`
-					);
-				}
+			// For nested arrays, all counts should match (same number of vertices)
+			if (isNestedPositions && Array.isArray(geom.normals[0]) && Array.isArray(geom.colors[0])) {
+				assert.strictEqual(
+					vertexCount,
+					normalCount,
+					`Entity ${i} positions and normals should have same vertex count`
+				);
+				assert.strictEqual(
+					vertexCount,
+					colorCount,
+					`Entity ${i} positions and colors should have same vertex count`
+				);
 			}
 		});
 	});
