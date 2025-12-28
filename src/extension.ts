@@ -210,12 +210,13 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 		#canvas-container {
 			flex: 1;
 			position: relative;
-			background-color: #1e1e1e;
+			background-color: #2d2d2d;
 		}
 		#renderCanvas {
 			width: 100%;
 			height: 100%;
 			display: block;
+			background-color: #2d2d2d;
 		}
 		#status {
 			padding: 8px 20px;
@@ -295,9 +296,18 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 				
 				console.log('Initialized camera:', camera);
 				
-				// Set up orbit controls with defaults
+				// Set up orbit controls with defaults and disable auto features
 				const orbitControls = controls.orbit;
 				let controlState = Object.assign({}, orbitControls.defaults);
+				
+				// Disable auto zoom-to-fit so manual controls work
+				if (controlState.zoomToFit) {
+					controlState.zoomToFit.auto = false;
+				}
+				// Disable auto rotate
+				if (controlState.autoRotate) {
+					controlState.autoRotate.enabled = false;
+				}
 				
 				console.log('Initialized controls:', controlState);
 				
@@ -348,10 +358,22 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 					const deltaX = e.clientX - lastX;
 					const deltaY = e.clientY - lastY;
 					
-					renderer.controls = renderer.orbitControls.rotate(
-						renderer.controls,
+					const updated = renderer.orbitControls.rotate(
+						{ controls: renderer.controls, camera: renderer.camera },
 						{ speed: 1, normalizedDelta: [deltaX / 100, deltaY / 100] }
 					);
+					
+					// Carefully update only the properties that changed
+					if (updated.controls) {
+						Object.keys(updated.controls).forEach(key => {
+							renderer.controls[key] = updated.controls[key];
+						});
+					}
+					if (updated.camera) {
+						Object.keys(updated.camera).forEach(key => {
+							renderer.camera[key] = updated.camera[key];
+						});
+					}
 					
 					lastX = e.clientX;
 					lastY = e.clientY;
@@ -370,11 +392,12 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 			canvas.addEventListener('wheel', (e) => {
 				e.preventDefault();
 				if (renderer) {
-					const delta = e.deltaY > 0 ? 1.1 : 0.9;
-					renderer.controls = renderer.orbitControls.zoom(
-						renderer.controls,
-						delta
-					);
+					// Use controls.scale for zoom - smaller increments for smoother control
+					// Decrease scale = zoom in, increase scale = zoom out
+					const scaleDelta = e.deltaY > 0 ? 0.05 : -0.05;
+					renderer.controls.scale = Math.max(0.1, Math.min(10, renderer.controls.scale + scaleDelta));
+					
+					console.log('Zoom:', { deltaY: e.deltaY, newScale: renderer.controls.scale });
 					
 					// Re-render with updated camera
 					if (currentEntities.length > 0) {
@@ -386,37 +409,48 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 
 		function renderScene() {
 			if (!renderer || !currentEntities || currentEntities.length === 0) {
-				console.log('Skipping render:', { hasRenderer: !!renderer, entityCount: currentEntities?.length });
 				return;
 			}
 			
 			try {
-				console.log('Rendering...', { entityCount: currentEntities.length });
-				
-				// Update camera from controls - merge the updates back into both camera and controls
+				// Update camera from controls
 				const updated = renderer.orbitControls.update({
 					controls: renderer.controls,
 					camera: renderer.camera
 				});
 				
-				// Merge updated properties back (don't replace the whole objects)
-				renderer.camera = Object.assign({}, renderer.camera, updated.camera);
-				renderer.controls = Object.assign({}, renderer.controls, updated.controls);
+				// Carefully update only the properties that changed
+				if (updated.controls) {
+					Object.keys(updated.controls).forEach(key => {
+						renderer.controls[key] = updated.controls[key];
+					});
+				}
+				if (updated.camera) {
+					Object.keys(updated.camera).forEach(key => {
+						renderer.camera[key] = updated.camera[key];
+					});
+				}
 				
-				console.log('About to call renderer.render with:', { 
-					cameraKeys: Object.keys(renderer.camera),
-					viewport: renderer.camera.viewport,
-					entityCount: currentEntities.length 
-				});
-				
-				// Render the scene
+				// Render the scene with grid and axes for debugging
 				renderer.render({
 					camera: renderer.camera,
 					drawCommands: renderer.drawCommands,
-					entities: currentEntities
+					entities: [
+						// Grid for reference
+						{
+							visuals: { drawCmd: 'drawGrid', show: true },
+							size: [200, 200],
+							ticks: [10, 1]
+						},
+						// Axes for orientation
+						{
+							visuals: { drawCmd: 'drawAxis', show: true },
+							size: 50
+						},
+						// User entities
+						...currentEntities
+					]
 				});
-				
-				console.log('Render complete!');
 			} catch (error) {
 				console.error('Render error:', error);
 				console.error('Error stack:', error.stack);
