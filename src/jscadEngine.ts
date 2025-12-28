@@ -119,11 +119,30 @@ export async function executeJscadFile(filePath: string, outputChannel: vscode.O
         // Import entitiesFromSolids at runtime using native require
         const { entitiesFromSolids } = extensionRequire('@jscad/regl-renderer');
         
+        // Log what the geometries look like
+        outputChannel.appendLine(`Raw geometries (${geometries.length}):`);
+        geometries.forEach((geom: any, i: number) => {
+            outputChannel.appendLine(`  [${i}] type: ${typeof geom}, keys: ${Object.keys(geom).join(', ')}`);
+            if (geom.polygons) outputChannel.appendLine(`      polygons: ${geom.polygons.length}`);
+            if (geom.sides) outputChannel.appendLine(`      sides: ${geom.sides}`);
+        });
+        
         // Convert geometries to renderer entities
         // This handles geometry type detection (2D vs 3D) and assigns proper draw commands
         const entities = entitiesFromSolids({}, ...geometries);
         
         outputChannel.appendLine(`Converted ${geometries.length} geometry object(s) to ${entities.length} render entit${entities.length === 1 ? 'y' : 'ies'}`);
+        
+        // Log what the entities look like
+        entities.forEach((entity: any, i: number) => {
+            outputChannel.appendLine(`  Entity[${i}]: geometry.type=${entity.geometry?.type}, positions=${entity.geometry?.positions?.length || 'none'}, indices=${entity.geometry?.indices?.length || 'none'}`);
+            if (entity.geometry?.positions) {
+                outputChannel.appendLine(`    First 12 positions: ${Array.from(entity.geometry.positions.slice(0, 12)).join(', ')}`);
+            }
+            if (entity.geometry?.indices) {
+                outputChannel.appendLine(`    All indices: ${Array.from(entity.geometry.indices).join(', ')}`);
+            }
+        });
         
         // Serialize entities for webview (convert typed arrays to regular arrays)
         const serializedEntities = entities.map((entity: any) => {

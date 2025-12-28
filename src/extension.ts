@@ -438,6 +438,18 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						...currentEntities
 					]
 				});
+				
+				// Debug: log what we're rendering
+				console.log('Rendering:', {
+					totalEntities: currentEntities.length + 2,
+					userEntities: currentEntities.length,
+					firstUserEntity: currentEntities[0] ? {
+						type: currentEntities[0].geometry?.type,
+						positions: currentEntities[0].geometry?.positions?.length,
+						indices: currentEntities[0].geometry?.indices?.length,
+						visuals: currentEntities[0].visuals
+					} : null
+				});
 			} catch (error) {
 				console.error('Render error:', error);
 				console.error('Error stack:', error.stack);
@@ -453,7 +465,7 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 
 			try {
 				// Convert arrays back to typed arrays for rendering
-				const processedEntities = entities.map(entity => {
+				const processedEntities = entities.map((entity, idx) => {
 					const processed = {
 						visuals: entity.visuals,
 						geometry: {
@@ -463,17 +475,41 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 					};
 					
 					// Convert regular arrays back to typed arrays
+					// Note: positions may be array of arrays (vertices) or flat array
 					if (entity.geometry.positions) {
-						processed.geometry.positions = new Float32Array(entity.geometry.positions);
+						const positions = entity.geometry.positions;
+						// Check if it's an array of arrays (vertices)
+						if (Array.isArray(positions[0])) {
+							// Flatten: [[x,y,z], [x,y,z]] -> [x,y,z,x,y,z]
+							processed.geometry.positions = new Float32Array(positions.flat());
+						} else {
+							// Already flat
+							processed.geometry.positions = new Float32Array(positions);
+						}
 					}
 					if (entity.geometry.normals) {
-						processed.geometry.normals = new Float32Array(entity.geometry.normals);
+						const normals = entity.geometry.normals;
+						if (Array.isArray(normals[0])) {
+							processed.geometry.normals = new Float32Array(normals.flat());
+						} else {
+							processed.geometry.normals = new Float32Array(normals);
+						}
 					}
 					if (entity.geometry.indices) {
-						processed.geometry.indices = new Uint32Array(entity.geometry.indices);
+						const indices = entity.geometry.indices;
+						if (Array.isArray(indices[0])) {
+							processed.geometry.indices = new Uint32Array(indices.flat());
+						} else {
+							processed.geometry.indices = new Uint32Array(indices);
+						}
 					}
 					if (entity.geometry.colors) {
-						processed.geometry.colors = new Float32Array(entity.geometry.colors);
+						const colors = entity.geometry.colors;
+						if (Array.isArray(colors[0])) {
+							processed.geometry.colors = new Float32Array(colors.flat());
+						} else {
+							processed.geometry.colors = new Float32Array(colors);
+						}
 					}
 					if (entity.geometry.transforms) {
 						processed.geometry.transforms = new Float32Array(entity.geometry.transforms);
@@ -488,6 +524,18 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 				// Store entities for re-rendering on resize
 				currentEntities = processedEntities;
 
+				// Debug: log the processed entities before auto-zoom
+				console.log('Processed entities before auto-zoom:', processedEntities.map(e => ({
+					type: e.geometry?.type,
+					hasPositions: !!e.geometry?.positions,
+					positionsLength: e.geometry?.positions?.length,
+					positionsType: e.geometry?.positions?.constructor.name,
+					firstFewPositions: e.geometry?.positions ? Array.from(e.geometry.positions.slice(0, 9)) : null
+				})));
+
+				// Auto-zoom to fit the geometry
+				autoZoomToFit(processedEntities);
+
 				// Render the scene with the pre-converted entities
 				renderScene();
 				
@@ -496,6 +544,60 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 			} catch (error) {
 				showError('Rendering failed: ' + error.message);
 			}
+		}
+		
+		function autoZoomToFit(entities) {
+			// Calculate bounding box of all entities
+			let minX = Infinity, minY = Infinity, minZ = Infinity;
+			let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+			let hasPositions = false;
+			
+			entities.forEach(entity => {
+				if (entity.geometry && entity.geometry.positions) {
+					hasPositions = true;
+					const positions = entity.geometry.positions;
+					for (let i = 0; i < positions.length; i += 3) {
+						minX = Math.min(minX, positions[i]);
+						minY = Math.min(minY, positions[i + 1]);
+						minZ = Math.min(minZ, positions[i + 2]);
+						maxX = Math.max(maxX, positions[i]);
+						maxY = Math.max(maxY, positions[i + 1]);
+						maxZ = Math.max(maxZ, positions[i + 2]);
+					}
+				}
+			});
+			
+			// If no geometry found, use defaults
+			if (!hasPositions || !isFinite(minX)) {
+				console.log('No valid geometry bounds, skipping auto-zoom');
+				return;
+			}
+			
+			// Calculate center and size
+			const centerX = (minX + maxX) / 2;
+			const centerY = (minY + maxY) / 2;
+			const centerZ = (minZ + maxZ) / 2;
+			const sizeX = maxX - minX;
+			const sizeY = maxY - minY;
+			const sizeZ = maxZ - minZ;
+			const maxSize = Math.max(sizeX, sizeY, sizeZ, 1); // at least 1 to avoid division by zero
+			
+			// Position camera to view the geometry
+			const distance = maxSize * 2.5;
+			
+			// Directly update camera target and position values in place
+			renderer.camera.target[0] = centerX;
+			renderer.camera.target[1] = centerY;
+			renderer.camera.target[2] = centerZ;
+			
+			renderer.camera.position[0] = centerX + distance * 0.5;
+			renderer.camera.position[1] = centerY - distance * 0.7;
+			renderer.camera.position[2] = centerZ + distance * 0.7;
+			
+			// Force view matrix recalculation by setting scale to trigger update
+			renderer.controls.scale = 1.0;
+			
+			console.log('Auto-zoom:', { center: [centerX, centerY, centerZ], distance, maxSize, bounds: { minX, maxX, minY, maxY, minZ, maxZ } });
 		}
 
 		function showError(message) {
