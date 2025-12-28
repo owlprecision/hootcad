@@ -478,22 +478,34 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 					// Note: positions may be array of arrays (vertices) or flat array
 					if (entity.geometry.positions) {
 						const positions = entity.geometry.positions;
+						let flatPositions;
 						// Check if it's an array of arrays (vertices)
 						if (Array.isArray(positions[0])) {
-							// Flatten: [[x,y,z], [x,y,z]] -> [x,y,z,x,y,z]
-							processed.geometry.positions = new Float32Array(positions.flat());
+							// Array of arrays: [[x,y,z], [x,y,z]]
+							flatPositions = positions.flat();
+						} else if (typeof positions[0] === 'object') {
+							// Array of objects: [{0:x, 1:y, 2:z}, ...]
+							flatPositions = positions.flatMap(p => [p[0], p[1], p[2]]);
 						} else {
 							// Already flat
-							processed.geometry.positions = new Float32Array(positions);
+							flatPositions = positions;
 						}
+						processed.geometry.positions = new Float32Array(flatPositions);
 					}
 					if (entity.geometry.normals) {
 						const normals = entity.geometry.normals;
+						let flatNormals;
 						if (Array.isArray(normals[0])) {
-							processed.geometry.normals = new Float32Array(normals.flat());
+							// Array of arrays: [[x,y,z], [x,y,z]]
+							flatNormals = normals.flat();
+						} else if (typeof normals[0] === 'object') {
+							// Array of objects: [{0:x, 1:y, 2:z}, ...]
+							flatNormals = normals.flatMap(n => [n[0], n[1], n[2]]);
 						} else {
-							processed.geometry.normals = new Float32Array(normals);
+							// Already flat
+							flatNormals = normals;
 						}
+						processed.geometry.normals = new Float32Array(flatNormals);
 					}
 					if (entity.geometry.indices) {
 						const indices = entity.geometry.indices;
@@ -502,14 +514,23 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						} else {
 							processed.geometry.indices = new Uint32Array(indices);
 						}
+						console.log('Indices:', {
+							incoming: indices.slice(0, 5),
+							processed: Array.from(processed.geometry.indices.slice(0, 15))
+						});
 					}
 					if (entity.geometry.colors) {
 						const colors = entity.geometry.colors;
+						let flatColors;
 						if (Array.isArray(colors[0])) {
-							processed.geometry.colors = new Float32Array(colors.flat());
+							flatColors = colors.flat();
+						} else if (typeof colors[0] === 'object') {
+							// Assume RGBA: {0:r, 1:g, 2:b, 3:a}
+							flatColors = colors.flatMap(c => [c[0], c[1], c[2], c[3] || 1.0]);
 						} else {
-							processed.geometry.colors = new Float32Array(colors);
+							flatColors = colors;
 						}
+						processed.geometry.colors = new Float32Array(flatColors);
 					}
 					if (entity.geometry.transforms) {
 						processed.geometry.transforms = new Float32Array(entity.geometry.transforms);

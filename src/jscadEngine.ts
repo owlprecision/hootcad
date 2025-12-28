@@ -135,7 +135,7 @@ export async function executeJscadFile(filePath: string, outputChannel: vscode.O
         
         // Log what the entities look like
         entities.forEach((entity: any, i: number) => {
-            outputChannel.appendLine(`  Entity[${i}]: geometry.type=${entity.geometry?.type}, positions=${entity.geometry?.positions?.length || 'none'}, indices=${entity.geometry?.indices?.length || 'none'}`);
+            outputChannel.appendLine(`  Entity[${i}]: geometry.type=${entity.geometry?.type}, positions=${entity.geometry?.positions?.length || 'none'}, normals=${entity.geometry?.normals?.length || 'none'}, indices=${entity.geometry?.indices?.length || 'none'}`);
             if (entity.geometry?.positions) {
                 outputChannel.appendLine(`    First 12 positions: ${Array.from(entity.geometry.positions.slice(0, 12)).join(', ')}`);
             }
