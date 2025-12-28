@@ -358,22 +358,9 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 					const deltaX = e.clientX - lastX;
 					const deltaY = e.clientY - lastY;
 					
-					const updated = renderer.orbitControls.rotate(
-						{ controls: renderer.controls, camera: renderer.camera },
-						{ speed: 1, normalizedDelta: [deltaX / 100, deltaY / 100] }
-					);
-					
-					// Carefully update only the properties that changed
-					if (updated.controls) {
-						Object.keys(updated.controls).forEach(key => {
-							renderer.controls[key] = updated.controls[key];
-						});
-					}
-					if (updated.camera) {
-						Object.keys(updated.camera).forEach(key => {
-							renderer.camera[key] = updated.camera[key];
-						});
-					}
+					// Update rotation deltas directly - these accumulate and are consumed by the update function
+					renderer.controls.thetaDelta += deltaX * 0.01;
+					renderer.controls.phiDelta += deltaY * 0.01;
 					
 					lastX = e.clientX;
 					lastY = e.clientY;
