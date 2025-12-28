@@ -439,17 +439,22 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 					]
 				});
 				
-				// Debug: log what we're rendering
-				console.log('Rendering:', {
-					totalEntities: currentEntities.length + 2,
-					userEntities: currentEntities.length,
-					firstUserEntity: currentEntities[0] ? {
-						type: currentEntities[0].geometry?.type,
-						positions: currentEntities[0].geometry?.positions?.length,
-						indices: currentEntities[0].geometry?.indices?.length,
-						visuals: currentEntities[0].visuals
-					} : null
-				});
+				// Debug: log what we're rendering (keep lightweight)
+				const first = currentEntities[0];
+				if (first?.geometry?.indices?.length) {
+					let maxIndex = 0;
+					for (let i = 0; i < first.geometry.indices.length; i++) {
+						const v = first.geometry.indices[i];
+						if (v > maxIndex) maxIndex = v;
+					}
+					console.log('Rendering:', {
+						userEntities: currentEntities.length,
+						positions: first.geometry.positions?.length,
+						indices: first.geometry.indices.length,
+						maxIndex,
+						visuals: first.visuals
+					});
+				}
 			} catch (error) {
 				console.error('Render error:', error);
 				console.error('Error stack:', error.stack);
@@ -465,7 +470,10 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 
 			try {
 				// Convert arrays back to typed arrays for rendering
-				const processedEntities = entities.map((entity, idx) => {
+				// NOTE: @jscad/regl-renderer drawMesh forces element type to uint16.
+				// Passing a Uint32Array here will corrupt indices (bytes interpreted as uint16),
+				// producing the "spiky"/random-triangle artifacts we've been seeing.
+				const processedEntities = entities.map((entity) => {
 					const processed = {
 						visuals: entity.visuals,
 						geometry: {
@@ -474,20 +482,15 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						}
 					};
 					
-					// Convert regular arrays back to typed arrays
-					// Note: positions may be array of arrays (vertices) or flat array
+					// Flatten nested arrays and convert to typed arrays
 					if (entity.geometry.positions) {
 						const positions = entity.geometry.positions;
 						let flatPositions;
-						// Check if it's an array of arrays (vertices)
 						if (Array.isArray(positions[0])) {
-							// Array of arrays: [[x,y,z], [x,y,z]]
 							flatPositions = positions.flat();
 						} else if (typeof positions[0] === 'object') {
-							// Array of objects: [{0:x, 1:y, 2:z}, ...]
 							flatPositions = positions.flatMap(p => [p[0], p[1], p[2]]);
 						} else {
-							// Already flat
 							flatPositions = positions;
 						}
 						processed.geometry.positions = new Float32Array(flatPositions);
@@ -496,28 +499,33 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						const normals = entity.geometry.normals;
 						let flatNormals;
 						if (Array.isArray(normals[0])) {
-							// Array of arrays: [[x,y,z], [x,y,z]]
 							flatNormals = normals.flat();
 						} else if (typeof normals[0] === 'object') {
-							// Array of objects: [{0:x, 1:y, 2:z}, ...]
 							flatNormals = normals.flatMap(n => [n[0], n[1], n[2]]);
 						} else {
-							// Already flat
 							flatNormals = normals;
 						}
 						processed.geometry.normals = new Float32Array(flatNormals);
 					}
 					if (entity.geometry.indices) {
 						const indices = entity.geometry.indices;
+						let flatIndices;
 						if (Array.isArray(indices[0])) {
-							processed.geometry.indices = new Uint32Array(indices.flat());
+							flatIndices = indices.flat();
+						} else if (typeof indices[0] === 'object') {
+							flatIndices = indices.flatMap(i => [i[0], i[1], i[2]]);
 						} else {
-							processed.geometry.indices = new Uint32Array(indices);
+							flatIndices = indices;
 						}
-						console.log('Indices:', {
-							incoming: indices.slice(0, 5),
-							processed: Array.from(processed.geometry.indices.slice(0, 15))
-						});
+						let maxIndex = 0;
+						for (let i = 0; i < flatIndices.length; i++) {
+							const v = flatIndices[i];
+							if (v > maxIndex) maxIndex = v;
+						}
+						if (maxIndex > 65535) {
+							throw new Error('Mesh has index ' + maxIndex + ' (> 65535). drawMesh uses uint16 indices.');
+						}
+						processed.geometry.indices = new Uint16Array(flatIndices);
 					}
 					if (entity.geometry.colors) {
 						const colors = entity.geometry.colors;
@@ -525,7 +533,6 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 						if (Array.isArray(colors[0])) {
 							flatColors = colors.flat();
 						} else if (typeof colors[0] === 'object') {
-							// Assume RGBA: {0:r, 1:g, 2:b, 3:a}
 							flatColors = colors.flatMap(c => [c[0], c[1], c[2], c[3] || 1.0]);
 						} else {
 							flatColors = colors;
@@ -544,15 +551,6 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 				
 				// Store entities for re-rendering on resize
 				currentEntities = processedEntities;
-
-				// Debug: log the processed entities before auto-zoom
-				console.log('Processed entities before auto-zoom:', processedEntities.map(e => ({
-					type: e.geometry?.type,
-					hasPositions: !!e.geometry?.positions,
-					positionsLength: e.geometry?.positions?.length,
-					positionsType: e.geometry?.positions?.constructor.name,
-					firstFewPositions: e.geometry?.positions ? Array.from(e.geometry.positions.slice(0, 9)) : null
-				})));
 
 				// Auto-zoom to fit the geometry
 				autoZoomToFit(processedEntities);
