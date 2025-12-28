@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { resolveJscadEntrypoint, executeJscadFile, GeometryData } from './jscadEngine';
+import { resolveJscadEntrypoint, executeJscadFile } from './jscadEngine';
 
 let outputChannel: vscode.OutputChannel;
 let currentPanel: vscode.WebviewPanel | undefined;
@@ -87,12 +87,15 @@ async function createOrShowPreview(context: vscode.ExtensionContext) {
 		vscode.ViewColumn.Two,
 		{
 			enableScripts: true,
-			retainContextWhenHidden: true
+			retainContextWhenHidden: true,
+			localResourceRoots: [
+				vscode.Uri.joinPath(context.extensionUri, 'node_modules', '@jscad', 'regl-renderer', 'dist')
+			]
 		}
 	);
 
 	// Set HTML content
-	currentPanel.webview.html = getWebviewContent();
+	currentPanel.webview.html = getWebviewContent(context, currentPanel.webview);
 
 	// Handle messages from webview
 	currentPanel.webview.onDidReceiveMessage(
@@ -131,14 +134,14 @@ async function executeAndRender(filePath: string) {
 		outputChannel.appendLine(`Executing JSCAD file: ${filePath}`);
 		statusBarItem.text = "HootCAD: Executing...";
 
-		const geometryData = await executeJscadFile(filePath, outputChannel);
+		const entities = await executeJscadFile(filePath, outputChannel);
 
 		if (currentPanel) {
 			currentPanel.webview.postMessage({
-				type: 'renderGeometry',
-				geometry: geometryData
+				type: 'renderEntities',
+				entities: entities
 			});
-			outputChannel.appendLine('Geometry data sent to webview');
+			outputChannel.appendLine('Render entities sent to webview');
 			statusBarItem.text = "HootCAD: Rendered";
 			
 			// Reset status after 3 seconds
@@ -161,7 +164,20 @@ async function executeAndRender(filePath: string) {
 	}
 }
 
-function getWebviewContent(): string {
+function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Webview): string {
+	// Get the renderer library path
+	const rendererPath = vscode.Uri.joinPath(
+		context.extensionUri,
+		'node_modules',
+		'@jscad',
+		'regl-renderer',
+		'dist',
+		'jscad-regl-renderer.min.js'
+	);
+	
+	// Convert to webview URI
+	const rendererUri = webview.asWebviewUri(rendererPath);
+
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -229,6 +245,7 @@ function getWebviewContent(): string {
 			color: var(--vscode-foreground);
 		}
 	</style>
+	<script src="${rendererUri}"></script>
 </head>
 <body>
 	<div id="container">
@@ -250,270 +267,61 @@ function getWebviewContent(): string {
 		const loadingElement = document.getElementById('loading');
 		const errorElement = document.getElementById('error-message');
 		
-		let gl = null;
-		let currentGeometry = null;
-		let geometryBuffers = []; // Track buffers for cleanup
-		let camera = {
-			position: [0, 0, 50],
-			target: [0, 0, 0],
-			rotation: { x: 0, y: 0 }
-		};
+		let renderer = null;
+		let currentEntities = [];
 
-		// Mouse interaction state
-		let isDragging = false;
-		let lastMouseX = 0;
-		let lastMouseY = 0;
+		// Initialize the JSCAD renderer
+		function initRenderer() {
+			try {
+				const container = canvas.parentElement;
+				canvas.width = container.clientWidth;
+				canvas.height = container.clientHeight;
 
-		// Initialize WebGL
-		function initWebGL() {
-			gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-			if (!gl) {
-				showError('WebGL not supported in this browser');
+				// Initialize the official JSCAD regl-renderer
+				const rendererOptions = {
+					glOptions: { 
+						canvas: canvas,
+						preserveDrawingBuffer: true
+					}
+				};
+				
+				renderer = jscadReglRenderer(rendererOptions);
+				
+				// Set up camera with reasonable defaults
+				const perspectiveCamera = renderer.camera.setProjection({
+					fov: 45,
+					near: 0.1,
+					far: 1000
+				});
+				renderer.camera.setPosition([0, 0, 100]);
+				renderer.camera.setTarget([0, 0, 0]);
+				
+				statusElement.textContent = 'Status: Renderer initialized';
+				return true;
+			} catch (error) {
+				showError('Failed to initialize renderer: ' + error.message);
 				return false;
 			}
-			
-			// Set canvas size
-			resizeCanvas();
-			
-			gl.clearColor(0.12, 0.12, 0.12, 1.0);
-			gl.enable(gl.DEPTH_TEST);
-			gl.enable(gl.CULL_FACE);
-			
-			return true;
 		}
 
-		function resizeCanvas() {
-			const container = canvas.parentElement;
-			canvas.width = container.clientWidth;
-			canvas.height = container.clientHeight;
-			if (gl) {
-				gl.viewport(0, 0, canvas.width, canvas.height);
+		function renderEntities(entities) {
+			if (!renderer) {
+				showError('Renderer not initialized');
+				return;
 			}
-		}
 
-		// Simple shader programs
-		const vertexShaderSource = \`
-			attribute vec3 aPosition;
-			uniform mat4 uModelViewProjection;
-			varying vec3 vColor;
-			
-			void main() {
-				gl_Position = uModelViewProjection * vec4(aPosition, 1.0);
-				// Simple color based on position
-				vColor = vec3(0.5) + aPosition * 0.02;
+			try {
+				// Store entities for re-rendering on resize
+				currentEntities = entities;
+
+				// Render the scene with the pre-converted entities
+				renderer.render({ entities: currentEntities });
+				
+				loadingElement.style.display = 'none';
+				statusElement.textContent = \`Status: Rendered \${entities.length} entit\${entities.length === 1 ? 'y' : 'ies'}\`;
+			} catch (error) {
+				showError('Rendering failed: ' + error.message);
 			}
-		\`;
-
-		const fragmentShaderSource = \`
-			precision mediump float;
-			varying vec3 vColor;
-			
-			void main() {
-				gl_FragColor = vec4(vColor, 1.0);
-			}
-		\`;
-
-		let shaderProgram = null;
-		let programInfo = null;
-
-		function initShaders() {
-			const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
-			const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-			
-			shaderProgram = gl.createProgram();
-			gl.attachShader(shaderProgram, vertexShader);
-			gl.attachShader(shaderProgram, fragmentShader);
-			gl.linkProgram(shaderProgram);
-			
-			if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-				showError('Shader program failed to link');
-				return false;
-			}
-			
-			programInfo = {
-				program: shaderProgram,
-				attribLocations: {
-					position: gl.getAttribLocation(shaderProgram, 'aPosition'),
-				},
-				uniformLocations: {
-					modelViewProjection: gl.getUniformLocation(shaderProgram, 'uModelViewProjection'),
-				},
-			};
-			
-			return true;
-		}
-
-		function createShader(type, source) {
-			const shader = gl.createShader(type);
-			gl.shaderSource(shader, source);
-			gl.compileShader(shader);
-			
-			if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-				console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
-				gl.deleteShader(shader);
-				return null;
-			}
-			
-			return shader;
-		}
-
-		function renderGeometry(geometryData) {
-			if (!gl || !programInfo) return;
-			
-			// Clean up old buffers before creating new ones
-			cleanupBuffers();
-			
-			currentGeometry = geometryData;
-			
-			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-			gl.useProgram(programInfo.program);
-			
-			for (const geom of geometryData) {
-				if (geom.type === 'geom3' && geom.positions && geom.indices) {
-					renderGeom3(geom);
-				}
-			}
-			
-			loadingElement.style.display = 'none';
-			statusElement.textContent = 'Status: Geometry rendered';
-		}
-
-		function cleanupBuffers() {
-			// Delete all tracked buffers to prevent memory leaks
-			for (const buffer of geometryBuffers) {
-				if (buffer) {
-					gl.deleteBuffer(buffer);
-				}
-			}
-			geometryBuffers = [];
-		}
-
-		function renderGeom3(geom) {
-			// Flatten positions array
-			const positions = new Float32Array(geom.positions.flat());
-			const indices = new Uint16Array(geom.indices);
-			
-			// Create buffers
-			const positionBuffer = gl.createBuffer();
-			geometryBuffers.push(positionBuffer); // Track for cleanup
-			gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-			gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-			
-			const indexBuffer = gl.createBuffer();
-			geometryBuffers.push(indexBuffer); // Track for cleanup
-			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-			
-			// Set up position attribute
-			gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-			gl.vertexAttribPointer(
-				programInfo.attribLocations.position,
-				3, // size
-				gl.FLOAT, // type
-				false, // normalize
-				0, // stride
-				0 // offset
-			);
-			gl.enableVertexAttribArray(programInfo.attribLocations.position);
-			
-			// Create transformation matrices
-			const projectionMatrix = createPerspectiveMatrix(
-				45 * Math.PI / 180, // fov
-				canvas.width / canvas.height, // aspect
-				0.1, // near
-				1000.0 // far
-			);
-			
-			const viewMatrix = createLookAtMatrix(
-				camera.position,
-				camera.target,
-				[0, 1, 0]
-			);
-			
-			const rotationMatrix = createRotationMatrix(camera.rotation.x, camera.rotation.y);
-			const modelViewMatrix = multiplyMatrices(viewMatrix, rotationMatrix);
-			const mvpMatrix = multiplyMatrices(projectionMatrix, modelViewMatrix);
-			
-			gl.uniformMatrix4fv(
-				programInfo.uniformLocations.modelViewProjection,
-				false,
-				mvpMatrix
-			);
-			
-			// Draw
-			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-			gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
-		}
-
-		// Matrix math helpers
-		function createPerspectiveMatrix(fov, aspect, near, far) {
-			const f = 1.0 / Math.tan(fov / 2);
-			const rangeInv = 1.0 / (near - far);
-			
-			return new Float32Array([
-				f / aspect, 0, 0, 0,
-				0, f, 0, 0,
-				0, 0, (near + far) * rangeInv, -1,
-				0, 0, near * far * rangeInv * 2, 0
-			]);
-		}
-
-		function createLookAtMatrix(eye, target, up) {
-			const z = normalize([eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]]);
-			const x = normalize(cross(up, z));
-			const y = cross(z, x);
-			
-			return new Float32Array([
-				x[0], y[0], z[0], 0,
-				x[1], y[1], z[1], 0,
-				x[2], y[2], z[2], 0,
-				-dot(x, eye), -dot(y, eye), -dot(z, eye), 1
-			]);
-		}
-
-		function createRotationMatrix(rotX, rotY) {
-			const cosX = Math.cos(rotX);
-			const sinX = Math.sin(rotX);
-			const cosY = Math.cos(rotY);
-			const sinY = Math.sin(rotY);
-			
-			return new Float32Array([
-				cosY, sinX * sinY, -cosX * sinY, 0,
-				0, cosX, sinX, 0,
-				sinY, -sinX * cosY, cosX * cosY, 0,
-				0, 0, 0, 1
-			]);
-		}
-
-		function multiplyMatrices(a, b) {
-			const result = new Float32Array(16);
-			for (let i = 0; i < 4; i++) {
-				for (let j = 0; j < 4; j++) {
-					result[i * 4 + j] = 
-						a[i * 4 + 0] * b[0 * 4 + j] +
-						a[i * 4 + 1] * b[1 * 4 + j] +
-						a[i * 4 + 2] * b[2 * 4 + j] +
-						a[i * 4 + 3] * b[3 * 4 + j];
-				}
-			}
-			return result;
-		}
-
-		function normalize(v) {
-			const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-			return [v[0] / len, v[1] / len, v[2] / len];
-		}
-
-		function cross(a, b) {
-			return [
-				a[1] * b[2] - a[2] * b[1],
-				a[2] * b[0] - a[0] * b[2],
-				a[0] * b[1] - a[1] * b[0]
-			];
-		}
-
-		function dot(a, b) {
-			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 		}
 
 		function showError(message) {
@@ -523,54 +331,17 @@ function getWebviewContent(): string {
 			statusElement.textContent = 'Status: Error - ' + message;
 		}
 
-		// Mouse interaction
-		canvas.addEventListener('mousedown', (e) => {
-			isDragging = true;
-			lastMouseX = e.clientX;
-			lastMouseY = e.clientY;
-		});
-
-		canvas.addEventListener('mousemove', (e) => {
-			if (!isDragging) return;
-			
-			const deltaX = e.clientX - lastMouseX;
-			const deltaY = e.clientY - lastMouseY;
-			
-			camera.rotation.y += deltaX * 0.01;
-			camera.rotation.x += deltaY * 0.01;
-			
-			lastMouseX = e.clientX;
-			lastMouseY = e.clientY;
-			
-			if (currentGeometry) {
-				renderGeometry(currentGeometry);
-			}
-		});
-
-		canvas.addEventListener('mouseup', () => {
-			isDragging = false;
-		});
-
-		canvas.addEventListener('mouseleave', () => {
-			isDragging = false;
-		});
-
-		// Zoom with mouse wheel
-		canvas.addEventListener('wheel', (e) => {
-			e.preventDefault();
-			const delta = e.deltaY > 0 ? 1.1 : 0.9;
-			camera.position[2] *= delta;
-			
-			if (currentGeometry) {
-				renderGeometry(currentGeometry);
-			}
-		});
-
 		// Handle window resize
 		window.addEventListener('resize', () => {
-			resizeCanvas();
-			if (currentGeometry) {
-				renderGeometry(currentGeometry);
+			if (renderer) {
+				const container = canvas.parentElement;
+				canvas.width = container.clientWidth;
+				canvas.height = container.clientHeight;
+				
+				// Re-render on resize
+				if (currentEntities.length > 0) {
+					renderer.render({ entities: currentEntities });
+				}
 			}
 		});
 
@@ -578,11 +349,11 @@ function getWebviewContent(): string {
 		window.addEventListener('message', event => {
 			const message = event.data;
 			switch (message.type) {
-				case 'renderGeometry':
-					if (message.geometry && message.geometry.length > 0) {
-						renderGeometry(message.geometry);
+				case 'renderEntities':
+					if (message.entities && message.entities.length > 0) {
+						renderEntities(message.entities);
 					} else {
-						showError('No geometry data received');
+						showError('No entity data received');
 					}
 					break;
 				case 'error':
@@ -591,12 +362,15 @@ function getWebviewContent(): string {
 			}
 		});
 
-		// Initialize
-		if (initWebGL() && initShaders()) {
-			statusElement.textContent = 'Status: Ready';
-			vscode.postMessage({ type: 'ready' });
+		// Initialize renderer and notify extension we're ready
+		if (typeof jscadReglRenderer !== 'undefined') {
+			if (initRenderer()) {
+				loadingElement.style.display = 'none';
+				statusElement.textContent = 'Status: Ready';
+				vscode.postMessage({ type: 'ready' });
+			}
 		} else {
-			showError('Failed to initialize WebGL renderer');
+			showError('JSCAD renderer library not loaded');
 		}
 	</script>
 </body>
