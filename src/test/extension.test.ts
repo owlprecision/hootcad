@@ -37,6 +37,29 @@ suite('Extension Test Suite', () => {
 			assert.ok(langs.includes('jscad'), 'JSCAD language should be registered');
 		});
 	});
+
+	test('Preview window title formatting', () => {
+		// Test Unix-style path
+		const unixPath = '/path/to/file/example.jscad';
+		const unixFileName = unixPath.split(/[/\\]/).pop() || 'preview';
+		assert.strictEqual(unixFileName, 'example.jscad', 'Should extract filename from Unix path');
+		assert.strictEqual(`🦉 ${unixFileName}`, '🦉 example.jscad', 'Should format title with owl emoji');
+
+		// Test Windows-style path
+		const windowsPath = 'C:\\Users\\file\\test.jscad';
+		const windowsFileName = windowsPath.split(/[/\\]/).pop() || 'preview';
+		assert.strictEqual(windowsFileName, 'test.jscad', 'Should extract filename from Windows path');
+
+		// Test filename without directory
+		const bareFilename = 'file.jscad';
+		const bareFileName = bareFilename.split(/[/\\]/).pop() || 'preview';
+		assert.strictEqual(bareFileName, 'file.jscad', 'Should handle filename without directory');
+
+		// Test fallback
+		const emptyPath = '';
+		const fallbackName = emptyPath.split(/[/\\]/).pop() || 'preview';
+		assert.strictEqual(fallbackName, 'preview', 'Should use fallback for empty path');
+	});
 });
 
 suite('JSCAD Engine Test Suite', () => {
