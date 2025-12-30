@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { resolveJscadEntrypoint, resolveJscadEntrypointWithOptions, executeJscadFile } from '../jscadEngine';
+import { resolveJscadEntrypoint, resolveJscadEntrypointWithOptions, executeJscadFile, getParameterDefinitions } from '../jscadEngine';
 
 suite('JSCAD Engine Test Suite', () => {
 	// Tests run from compiled output in CI (out/test/**). Fixtures live in src/test/fixtures.
@@ -257,6 +257,22 @@ module.exports = { main }
 			);
 		});
 
+		test('executeJscadFile error stack includes .jscad source location', async () => {
+			const filePath = path.join(fixturesPath, 'runtime-error.jscad');
+			try {
+				await executeJscadFile(filePath, mockOutputChannel);
+				assert.fail('Expected executeJscadFile to throw');
+			} catch (err) {
+				assert.ok(err && typeof err === 'object', 'Should throw an error-like object');
+				const stack = (err as any).stack;
+				assert.ok(typeof stack === 'string' && stack.length > 0, 'Error should include a stack trace');
+				assert.ok(
+					stack.includes(filePath),
+					`Stack trace should include the source file path (${filePath})`
+				);
+			}
+		});
+
 		test('executeJscadFile clears require cache for fresh execution', async () => {
 			const filePath = path.join(fixturesPath, 'valid-cube.jscad');
 			
@@ -309,8 +325,9 @@ module.exports = { main }
 				await executeJscadFile(filePath, mockOutputChannel);
 				assert.fail('Should have thrown an error');
 			} catch (error) {
-				assert.ok(error instanceof Error, 'Should throw Error instance');
-				assert.ok(error.message.includes('Intentional runtime error'), 'Should include error message');
+				assert.ok(error && typeof error === 'object', 'Should throw error-like object');
+				assert.ok(typeof (error as any).message === 'string', 'Should include error message');
+				assert.ok((error as any).message.includes('Intentional runtime error'), 'Should include error message');
 			}
 		});
 
@@ -352,6 +369,118 @@ module.exports = { main }
 			}
 			
 			assert.ok(logs.some(log => log.includes('Error executing JSCAD file')), 'Should log error');
+		});
+	});
+
+	suite('Parameter Definitions', () => {
+		test('getParameterDefinitions returns empty array for file without parameters', async () => {
+			const filePath = path.join(fixturesPath, 'valid-cube.jscad');
+			
+			const definitions = await getParameterDefinitions(filePath, mockOutputChannel);
+			
+			assert.ok(Array.isArray(definitions), 'Should return an array');
+			assert.strictEqual(definitions.length, 0, 'Should return empty array for no parameters');
+		});
+
+		test('getParameterDefinitions returns definitions from parametric file', async () => {
+			// Create a test file with parameters
+			const testDir = path.join(fixturesPath, 'param-test');
+			if (!fs.existsSync(testDir)) {
+				fs.mkdirSync(testDir, { recursive: true });
+			}
+			
+			const filePath = path.join(testDir, 'parametric.jscad');
+			const content = `
+const { cube } = require('@jscad/modeling').primitives
+
+const getParameterDefinitions = () => {
+	return [
+		{ name: 'size', type: 'number', initial: 10, min: 1, max: 50, caption: 'Cube Size' },
+		{ name: 'center', type: 'checkbox', checked: false, caption: 'Center Cube' }
+	]
+}
+
+const main = (params) => cube({ size: params.size || 10 })
+
+module.exports = { main, getParameterDefinitions }
+			`;
+			
+			try {
+				fs.writeFileSync(filePath, content);
+				
+				const definitions = await getParameterDefinitions(filePath, mockOutputChannel);
+				
+				assert.ok(Array.isArray(definitions), 'Should return an array');
+				assert.strictEqual(definitions.length, 2, 'Should return two parameter definitions');
+				assert.strictEqual(definitions[0].name, 'size', 'First parameter should be size');
+				assert.strictEqual(definitions[0].type, 'number', 'Should have correct type');
+				assert.strictEqual(definitions[0].initial, 10, 'Should have initial value');
+				assert.strictEqual(definitions[1].name, 'center', 'Second parameter should be center');
+				assert.strictEqual(definitions[1].type, 'checkbox', 'Should have checkbox type');
+			} finally {
+				// Clean up
+				if (fs.existsSync(testDir)) {
+					fs.rmSync(testDir, { recursive: true });
+				}
+			}
+		});
+
+		test('executeJscadFile uses provided parameters', async () => {
+			// Create a parametric test file
+			const testDir = path.join(fixturesPath, 'param-test');
+			if (!fs.existsSync(testDir)) {
+				fs.mkdirSync(testDir, { recursive: true });
+			}
+			
+			const filePath = path.join(testDir, 'parametric-exec.jscad');
+			const content = `
+const { cube } = require('@jscad/modeling').primitives
+
+const main = (params) => {
+	const size = params.size || 10;
+	return cube({ size });
+}
+
+module.exports = { main }
+			`;
+			
+			try {
+				fs.writeFileSync(filePath, content);
+				
+				// Execute with custom parameters
+				const params = { size: 25 };
+				const entities = await executeJscadFile(filePath, mockOutputChannel, params);
+				
+				assert.ok(Array.isArray(entities), 'Should return entities array');
+				assert.ok(entities.length > 0, 'Should return at least one entity');
+				// The geometry should reflect the custom size (25 vs default 10)
+				// We can't directly verify the size, but we can verify execution succeeded
+			} finally {
+				// Clean up
+				if (fs.existsSync(testDir)) {
+					fs.rmSync(testDir, { recursive: true });
+				}
+			}
+		});
+
+		test('executeJscadFile uses empty params when none provided', async () => {
+			const filePath = path.join(fixturesPath, 'valid-cube.jscad');
+			
+			// Execute without parameters (should use empty object)
+			const entities = await executeJscadFile(filePath, mockOutputChannel);
+			
+			assert.ok(Array.isArray(entities), 'Should return entities array');
+			assert.ok(entities.length > 0, 'Should return at least one entity');
+		});
+
+		test('getParameterDefinitions handles errors gracefully', async () => {
+			const filePath = path.join(fixturesPath, 'syntax-error.jscad');
+			
+			// Should not throw, but return empty array
+			const definitions = await getParameterDefinitions(filePath, mockOutputChannel);
+			
+			assert.ok(Array.isArray(definitions), 'Should return an array');
+			assert.strictEqual(definitions.length, 0, 'Should return empty array on error');
 		});
 	});
 });

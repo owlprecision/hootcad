@@ -19,7 +19,7 @@ This roadmap outlines our phased approach to building a CAD tool that treats des
 
 **Goal:** Establish a reliable baseline for scripted CAD in HootCAD.
 
-**Status:** ✅ Complete (v0.5)
+**Status:** ✅ Complete 
 
 - ✅ Get the `.jscad` execution pipeline working end-to-end
 - ✅ Integrate the default JSCAD renderer/viewer
@@ -33,13 +33,11 @@ This phase is about correctness and trust: if the core doesn't run predictably, 
 
 **Goal:** Make parametric models usable and explorable.
 
-**Status:** 🚧 Work in Progress
+**Status:** ✅ Complete 
 
 - Implement parameter discovery (`getParameterDefinitions`)
 - Build parameter editing UI
 - Enable live re-rendering on parameter changes
-
-This is where models stop being "scripts" and start being *tools*.
 
 ---
 
