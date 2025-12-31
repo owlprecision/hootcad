@@ -1,10 +1,13 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { WebviewContentProvider } from '../webviewContentProvider';
+import * as fs from 'fs';
+import * as path from 'path';
 import { parse } from 'acorn';
 
 suite('Webview Content Validation', () => {
 	let provider: WebviewContentProvider;
+		let extensionPath: string;
 
 	suiteSetup(async () => {
 		// Get extension and activate it
@@ -20,6 +23,7 @@ suite('Webview Content Validation', () => {
 			extensionUri: ext.extensionUri,
 			extensionPath: ext.extensionPath,
 		} as vscode.ExtensionContext;
+			extensionPath = ext.extensionPath;
 		
 		provider = new WebviewContentProvider(mockContext);
 	});
@@ -41,48 +45,35 @@ suite('Webview Content Validation', () => {
 	});
 
 	test('Generated HTML should have valid JavaScript syntax', () => {
-		const mockWebview = createMockWebview();
-		const html = provider.getWebviewContent(mockWebview);
-		
-		// Extract script content
-		const scriptMatch = html.match(/<script type="module">([\s\S]*?)<\/script>/);
-		assert.ok(scriptMatch, 'Should have script tag');
-		
-		const scriptContent = scriptMatch![1];
+		// Parse the external renderer entry module from disk (authoritative correctness check)
+		const rendererPath = path.join(extensionPath, 'src', 'webview', 'renderer.js');
+		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
 
-		// Authoritative correctness check: parse the extracted script as an ES module.
-		// This reliably catches syntax errors like "missing ) after argument list".
-		parse(scriptContent, {
+		parse(rendererCode, {
 			ecmaVersion: 'latest',
 			sourceType: 'module'
 		});
-		
+
 		// Check for required function definitions
-		assert.ok(scriptContent.includes('function initThreeJS'), 'Should define initThreeJS function');
-		assert.ok(scriptContent.includes('function renderGeometries'), 'Should define renderGeometries function');
-		assert.ok(scriptContent.includes('function showError'), 'Should define showError function');
-		assert.ok(scriptContent.includes('function hideError'), 'Should define hideError function');
-		assert.ok(scriptContent.includes('function fitCameraToObjects'), 'Should define fitCameraToObjects function');
+		assert.ok(rendererCode.includes('function initThreeJS'), 'Should define initThreeJS function');
+		assert.ok(rendererCode.includes('function renderGeometries'), 'Should define renderGeometries function');
+		assert.ok(rendererCode.includes('function showError'), 'Should define showError function');
+		assert.ok(rendererCode.includes('function hideError'), 'Should define hideError function');
+		assert.ok(rendererCode.includes('function fitCameraToObjects'), 'Should define fitCameraToObjects function');
 	});
 
 	test('Generated HTML should not contain syntax errors in string concatenation', () => {
-		const mockWebview = createMockWebview();
-		const html = provider.getWebviewContent(mockWebview);
-		
-		// Extract script content
-		const scriptMatch = html.match(/<script type="module">([\s\S]*?)<\/script>/);
-		const scriptContent = scriptMatch![1];
-		
+		const rendererPath = path.join(extensionPath, 'src', 'webview', 'renderer.js');
+		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
+
 		// Check that status messages are properly formatted
 		assert.ok(
-			scriptContent.includes("'Status: Rendered '") || 
-			scriptContent.includes('"Status: Rendered "') ||
-			scriptContent.includes('`Status: Rendered ${'),
+			rendererCode.includes("'Status: Rendered '") ||
+			rendererCode.includes('"Status: Rendered "') ||
+			rendererCode.includes('`Status: Rendered ${') ||
+			rendererCode.includes('Status: Rendered '),
 			'Status message should be properly formatted'
 		);
-		
-		// Note: We intentionally don't do naive quote-counting here.
-		// The JS parser validation test above is the authoritative correctness check.
 	});
 
 	test('Generated HTML should include required DOM elements', () => {
@@ -101,15 +92,23 @@ suite('Webview Content Validation', () => {
 	test('Generated HTML should properly import Three.js modules', () => {
 		const mockWebview = createMockWebview();
 		const html = provider.getWebviewContent(mockWebview);
-		
-		// Extract script content
-		const scriptMatch = html.match(/<script type="module">([\s\S]*?)<\/script>/);
-		const scriptContent = scriptMatch![1];
-		
-		// Check for imports
-		assert.ok(scriptContent.includes("import * as THREE from"), 'Should import THREE.js');
-		assert.ok(scriptContent.includes("import { convertGeom3ToBufferGeometry"), 'Should import converter functions');
-		assert.ok(scriptContent.includes("import { updateParameterUI }"), 'Should import parameter UI');
+
+		// Script should be external (no inline renderer)
+		assert.ok(
+			html.match(/<script[^>]*type="module"[^>]*src="[^"]+"[^>]*><\/script>/),
+			'Should have external module script tag'
+		);
+		assert.ok(
+			html.includes('<link rel="stylesheet"'),
+			'Should reference external stylesheet'
+		);
+
+		// Check that renderer.js is set up to load the modules
+		const rendererPath = path.join(extensionPath, 'src', 'webview', 'renderer.js');
+		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
+		assert.ok(rendererCode.includes('await import(config.threeUri)'), 'Should import THREE.js via config');
+		assert.ok(rendererCode.includes('await import(config.converterUri)'), 'Should import converter via config');
+		assert.ok(rendererCode.includes('await import(config.parameterUIUri)'), 'Should import parameter UI via config');
 	});
 });
 

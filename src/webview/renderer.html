@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>HootCAD Preview</title>
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}}; script-src 'nonce-{{nonce}}' {{cspSource}};" />
+	<meta name="hootcad-config" content="{{config}}" />
+	<link rel="stylesheet" href="{{stylesUri}}" />
+</head>
+<body>
+	<div id="container">
+		<div id="header">
+			<h1>HootCAD Preview</h1>
+		</div>
+		<div id="canvas-container">
+			<canvas id="renderCanvas"></canvas>
+			<div id="loading" class="loading">Loading...</div>
+			<div id="error-message"></div>
+			<div id="parameter-panel">
+				<div id="parameter-header">
+					<div id="parameter-title">Parameters</div>
+					<button id="collapse-button" title="Collapse/Expand">▼</button>
+				</div>
+				<div id="parameter-content"></div>
+			</div>
+		</div>
+		<div id="status">Status: Initializing...</div>
+	</div>
+
+	<script type="module" nonce="{{nonce}}" src="{{rendererUri}}"></script>
+</body>
+</html>
