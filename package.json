@@ -2,7 +2,7 @@
   "name": "hootcad",
   "displayName": "HootCAD",
   "description": "VS Code extension to view JSCAD files",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "publisher": "hootcad",
   "repository": {
     "type": "git",
@@ -16,7 +16,8 @@
   ],
   "activationEvents": [
     "onLanguage:jscad",
-    "onCommand:hootcad.openPreview"
+    "onCommand:hootcad.openPreview",
+    "onCommand:hootcad.export"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -24,6 +25,10 @@
       {
         "command": "hootcad.openPreview",
         "title": "HootCAD: Open Preview"
+      },
+      {
+        "command": "hootcad.export",
+        "title": "HootCAD: Export"
       }
     ],
     "languages": [
@@ -59,13 +64,13 @@
     "package:vsix": "vsce package --skip-license"
   },
   "devDependencies": {
-    "acorn": "^8.15.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.107.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.1",
+    "acorn": "^8.15.0",
     "eslint": "^9.39.1",
     "ts-loader": "^9.5.4",
     "typescript": "^5.9.3",
@@ -74,7 +79,14 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
+    "@jscad/amf-serializer": "^2.1.21",
+    "@jscad/dxf-serializer": "^2.1.21",
+    "@jscad/json-serializer": "^2.0.31",
     "@jscad/modeling": "^2.12.6",
+    "@jscad/obj-serializer": "^2.1.21",
+    "@jscad/stl-serializer": "^2.1.21",
+    "@jscad/svg-serializer": "^2.3.19",
+    "@jscad/x3d-serializer": "^2.4.11",
     "@types/three": "^0.182.0",
     "three": "^0.182.0"
   }

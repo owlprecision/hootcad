@@ -7,7 +7,9 @@ VS Code extension to view and render JSCAD files in 3D
 - **JSCAD 3D Rendering** - Execute and visualize JSCAD scripts in real-time
 - **Smart Entrypoint Resolution** - Automatically finds your JSCAD entrypoint via package.json, index.jscad, or active editor
 - **Interactive 3D Viewer** - WebGL-based rendering with camera controls (rotate with mouse drag, zoom with mouse wheel)
+- **Export to Multiple Formats** - Export your JSCAD models to STL, OBJ, AMF, DXF, SVG, JSON, and X3D formats
 - **HootCAD: Open Preview** command to open a preview panel
+- **HootCAD: Export** command to export models to various formats
 - Activates automatically when opening `.jscad` files
 - Output channel "HootCAD" for logging and error messages
 - Status bar indicator showing current file and execution status
@@ -21,6 +23,12 @@ VS Code extension to view and render JSCAD files in 3D
 5. Interact with the 3D view:
    - **Left click + drag**: Rotate camera
    - **Mouse wheel**: Zoom in/out
+6. To export your model:
+   - Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
+   - Run **HootCAD: Export**
+   - Select the desired export format
+   - Choose export options (if required)
+   - Select save location and filename
 
 ## JSCAD Entrypoint Resolution
 
@@ -43,6 +51,40 @@ module.exports = { main }
 ```
 
 See the `examples/` directory for more examples including sphere, snowman, and other shapes.
+
+## Export Formats
+
+HootCAD supports exporting to the following formats using official JSCAD serializers:
+
+### 3D Formats
+- **STL** (Stereolithography) - Common format for 3D printing
+  - Options: Binary or ASCII format
+- **OBJ** (Wavefront Object) - Common 3D mesh format
+  - Options: Triangle or polygon faces
+- **AMF** (Additive Manufacturing Format) - Advanced 3D printing format
+  - Options: Unit of measurement (mm, inch, feet, meter, micrometer)
+- **X3D** (Extensible 3D) - ISO standard for 3D graphics
+
+### 2D Formats
+- **SVG** (Scalable Vector Graphics) - Vector graphics for 2D geometries
+  - Options: Unit of measurement (mm, cm, in, px, pt, pc, em, ex)
+- **DXF** (Drawing Exchange Format) - CAD interchange format supporting 2D and 3D
+
+### Universal Format
+- **JSON** - JSCAD native geometry format (supports all geometry types)
+
+### Using the Export Command
+
+1. Open or create a `.jscad` file
+2. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
+3. Type "HootCAD: Export" and select the command
+4. Choose your export format from the list
+5. Configure format-specific options (if any)
+6. Select where to save the file
+7. The export will run with progress feedback
+8. You'll be notified when the export completes
+
+The export command automatically resolves the JSCAD entrypoint using the same logic as the preview command.
 
 ## Development
 
@@ -194,11 +236,13 @@ This is a v0.5 implementation focused on core rendering functionality:
 - Smart entrypoint resolution
 - Basic camera controls (rotate, zoom)
 - Error handling and logging
+- Export to STL, OBJ, AMF, DXF, SVG, JSON, and X3D formats
+- Format-specific export options
+- Interactive parameter UI (`getParameterDefinitions`)
 
 ❌ **Not yet implemented (future milestones):**
-- Parameter UI (`getParameterDefinitions`)
 - Multi-file dependency tracking
-- File watching and auto-refresh
-- Export to STL/OBJ/STEP
+- File watching and auto-refresh (for preview)
+- Export to STEP format (requires OpenCascade integration)
 - Advanced rendering (lighting, materials, shadows)
 - 2D geometry rendering optimization

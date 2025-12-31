@@ -4,6 +4,7 @@ import { WebviewManager } from './webviewManager';
 import { ParameterCache } from './parameterCache';
 import { resolveJscadEntrypoint } from './jscadEngine';
 import { extractFilename } from './utilities';
+import { executeExportCommand } from './exportCommand';
 
 /**
  * Manages extension lifecycle, commands, and file watchers
@@ -13,17 +14,18 @@ export class ExtensionLifecycle {
 	private errorReporter: ErrorReporter;
 	private webviewManager: WebviewManager;
 	private statusBarItem: vscode.StatusBarItem;
+	private outputChannel: vscode.OutputChannel;
 
 	constructor(context: vscode.ExtensionContext) {
 		this.context = context;
 
 		// Create output channel
-		const outputChannel = vscode.window.createOutputChannel("HootCAD");
-		context.subscriptions.push(outputChannel);
-		outputChannel.appendLine('HootCAD extension activated');
+		this.outputChannel = vscode.window.createOutputChannel("HootCAD");
+		context.subscriptions.push(this.outputChannel);
+		this.outputChannel.appendLine('HootCAD extension activated');
 
 		// Initialize error reporter
-		this.errorReporter = new ErrorReporter(outputChannel);
+		this.errorReporter = new ErrorReporter(this.outputChannel);
 
 		// Initialize parameter cache
 		const parameterCache = new ParameterCache(context);
@@ -56,6 +58,12 @@ export class ExtensionLifecycle {
 			await this.webviewManager.createOrShowPreview();
 		});
 		this.context.subscriptions.push(openPreviewCommand);
+
+		const exportCommand = vscode.commands.registerCommand('hootcad.export', async () => {
+			this.errorReporter.logInfo('Executing export command...');
+			await executeExportCommand(this.errorReporter, this.outputChannel);
+		});
+		this.context.subscriptions.push(exportCommand);
 	}
 
 	/**

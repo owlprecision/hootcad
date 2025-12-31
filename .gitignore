@@ -4,3 +4,6 @@ dist
 *.vsix
 .vscode-test
 .vscode-test.*.log
+src/test/fixtures/test-export.*
+src/test/fixtures/workspace-test-*
+src/test/fixtures/param-test
