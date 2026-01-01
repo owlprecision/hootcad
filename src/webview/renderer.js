@@ -128,10 +128,16 @@
 		let camera;
 		let renderer;
 		let meshGroup;
+		let floorMesh;
+		let floorMaterial;
 		let keyLight;
 		let animationFrameId = null;
 		let hasRenderedOnce = false; // Track if we've done initial render with auto-zoom
 		let userHasInteracted = false; // Track if user has moved camera
+		let isFloorGhosted = false;
+
+		const GRID_SIZE = 400;
+		const GRID_DIVISIONS = 40;
 
 		// Manual orbit-control state (shared by auto-fit + user input)
 		const cameraTarget = new THREE.Vector3(0, 0, 0);
@@ -222,6 +228,24 @@
 
 		function animate() {
 			animationFrameId = requestAnimationFrame(animate);
+
+			if (floorMesh && floorMesh.visible && floorMaterial) {
+				const shouldGhost = camera.position.y < floorMesh.position.y;
+				if (shouldGhost !== isFloorGhosted) {
+					isFloorGhosted = shouldGhost;
+					if (isFloorGhosted) {
+						floorMaterial.transparent = true;
+						floorMaterial.opacity = 0.35;
+						floorMaterial.depthWrite = false;
+					} else {
+						floorMaterial.transparent = false;
+						floorMaterial.opacity = 1;
+						floorMaterial.depthWrite = true;
+					}
+					floorMaterial.needsUpdate = true;
+				}
+			}
+
 			renderer.render(scene, camera);
 		}
 
@@ -238,11 +262,11 @@
 			}
 		}
 
-		function fitCameraToObjects() {
+		function getMeshGroupBounds() {
 			const box = new THREE.Box3();
 
 			if (meshGroup.children.length === 0) {
-				return;
+				return null;
 			}
 
 			// Ensure world matrices are up-to-date before computing bounds
@@ -257,6 +281,40 @@
 			const size = new THREE.Vector3();
 			box.getCenter(center);
 			box.getSize(size);
+
+			return { box, center, size };
+		}
+
+		function updateFloorFromBounds(bounds) {
+			if (!floorMesh) {
+				return;
+			}
+			if (!bounds) {
+				floorMesh.visible = false;
+				return;
+			}
+
+			const { box } = bounds;
+			const offset = 0.01;
+
+			floorMesh.visible = true;
+			floorMesh.position.y = box.min.y - offset;
+			// Geometry vertices are rotated into the XZ plane, so scale X and Z.
+			floorMesh.scale.set(GRID_SIZE, 1, GRID_SIZE);
+			isFloorGhosted = false;
+			if (floorMaterial) {
+				floorMaterial.transparent = false;
+				floorMaterial.opacity = 1;
+				floorMaterial.depthWrite = true;
+			}
+		}
+
+		function fitCameraToObjects() {
+			const bounds = getMeshGroupBounds();
+			if (!bounds) {
+				return;
+			}
+			const { center, size } = bounds;
 
 			const maxDim = Math.max(size.x, size.y, size.z);
 			const minSize = 10;
@@ -350,6 +408,8 @@
 
 			statusElement.textContent = 'Status: Rendered ' + geometries.length + ' object(s)';
 
+			updateFloorFromBounds(getMeshGroupBounds());
+
 			if (!hasRenderedOnce && !userHasInteracted) {
 				fitCameraToObjects();
 				hasRenderedOnce = true;
@@ -440,7 +500,7 @@
 			rimLight.position.set(0, 15, -45);
 			scene.add(rimLight);
 
-			const gridHelper = new THREE.GridHelper(400, 40, 0x8899aa, 0xc5d0dd);
+			const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x8899aa, 0xc5d0dd);
 			scene.add(gridHelper);
 
 			const axesHelper = new THREE.AxesHelper(100);
@@ -448,6 +508,22 @@
 
 			meshGroup = new THREE.Group();
 			scene.add(meshGroup);
+
+			// Floor plane (positioned dynamically per-model).
+			// Use a unit plane and scale it per render to avoid re-allocating geometry.
+			const floorGeometry = new THREE.PlaneGeometry(1, 1);
+			floorGeometry.rotateX(-Math.PI / 2);
+			floorMaterial = new THREE.MeshStandardMaterial({
+				color: 0xf7f7f7,
+				metalness: 0,
+				roughness: 0.95,
+				side: THREE.DoubleSide
+			});
+			floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
+			floorMesh.castShadow = false;
+			floorMesh.receiveShadow = SHADOW_PRESET.enabled;
+			floorMesh.visible = false;
+			scene.add(floorMesh);
 
 			setupControls();
 
