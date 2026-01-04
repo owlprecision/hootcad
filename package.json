@@ -1,7 +1,7 @@
 {
   "name": "hootcad",
   "displayName": "HootCAD",
-  "description": "VS Code extension to view JSCAD files",
+  "description": "VS Code and Cursor extension to view JSCAD files",
   "version": "0.1.1",
   "publisher": "hootcad",
   "repository": {
@@ -9,10 +9,19 @@
     "url": "https://github.com/joelmartinez/hootcad"
   },
   "engines": {
-    "vscode": "^1.107.0"
+    "vscode": "^1.95.0"
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "jscad",
+    "3d",
+    "cad",
+    "modeling",
+    "preview",
+    "cursor",
+    "vscode"
   ],
   "activationEvents": [
     "onLanguage:jscad",
@@ -66,7 +75,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "@types/vscode": "^1.107.0",
+    "@types/vscode": "^1.95.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.1",
