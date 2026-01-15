@@ -83,4 +83,40 @@ const webviewConfig = {
   },
 };
 
-module.exports = [ extensionConfig, webviewConfig ];
+/** @type WebpackConfig */
+const mcpServerConfig = {
+  target: 'node',
+  mode: 'none',
+
+  entry: './src/mcpServer.ts',
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: 'mcpServer.js',
+    libraryTarget: 'commonjs2'
+  },
+  externals: {
+    // Bundle everything for the MCP server
+  },
+  resolve: {
+    extensions: ['.ts', '.js']
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        exclude: /node_modules/,
+        use: [
+          {
+            loader: 'ts-loader'
+          }
+        ]
+      }
+    ]
+  },
+  devtool: 'nosources-source-map',
+  infrastructureLogging: {
+    level: "log",
+  },
+};
+
+module.exports = [ extensionConfig, webviewConfig, mcpServerConfig ];

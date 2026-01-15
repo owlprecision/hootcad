@@ -149,6 +149,8 @@ import { updateParameterUI } from './parameterUI.js';
 		const cameraTarget = new THREE.Vector3(0, 0, 0);
 		const cameraRotation = { theta: Math.PI / 4, phi: Math.PI / 4 };
 		let cameraDistance = 50;
+		let minCameraDistance = 5;
+		let maxCameraDistance = 200;
 
 		function updateCameraPosition() {
 			const sinPhi = Math.sin(cameraRotation.phi);
@@ -207,8 +209,12 @@ import { updateParameterUI } from './parameterUI.js';
 			canvas.addEventListener('wheel', (e) => {
 				e.preventDefault();
 				userHasInteracted = true; // Mark that user has interacted
-				cameraDistance += e.deltaY * 0.05;
-				cameraDistance = Math.max(5, Math.min(200, cameraDistance));
+				const modeMultiplier = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? 100 : 1);
+				const delta = e.deltaY * modeMultiplier;
+				const zoomSpeed = 0.0012;
+				const zoomFactor = Math.exp(delta * zoomSpeed);
+				cameraDistance *= zoomFactor;
+				cameraDistance = Math.max(minCameraDistance, Math.min(maxCameraDistance, cameraDistance));
 				updateCameraPosition();
 			}, { passive: false });
 		}
@@ -394,17 +400,22 @@ import { updateParameterUI } from './parameterUI.js';
 				return;
 			}
 
-			const { box } = bounds;
+			const { box, size } = bounds;
 			const floorOffset = 0.01;
 			const gridOffsetAboveFloor = 0.01;
+			const maxDim = Math.max(size.x, size.y, size.z);
+			const minPlaneSize = GRID_SIZE;
+			const desiredPlaneSize = Math.max(minPlaneSize, maxDim * 2);
 
 			floorMesh.visible = true;
 			floorMesh.position.y = box.min.y - floorOffset;
 			if (gridHelper) {
 				gridHelper.position.y = floorMesh.position.y + gridOffsetAboveFloor;
+				const gridScale = desiredPlaneSize / GRID_SIZE;
+				gridHelper.scale.set(gridScale, 1, gridScale);
 			}
 			// Geometry vertices are rotated into the XZ plane, so scale X and Z.
-			floorMesh.scale.set(GRID_SIZE, 1, GRID_SIZE);
+			floorMesh.scale.set(desiredPlaneSize, 1, desiredPlaneSize);
 			isFloorGhosted = false;
 			if (floorMaterial) {
 				floorMaterial.transparent = false;
@@ -427,9 +438,17 @@ import { updateParameterUI } from './parameterUI.js';
 			const fov = camera.fov * (Math.PI / 180);
 			const distance = effectiveSize / (2 * Math.tan(fov / 2));
 			const paddedDistance = distance * 1.5;
+			const far = Math.max(1000, paddedDistance * 100);
+			const near = Math.max(0.01, far / 100000);
+
+			camera.near = near;
+			camera.far = far;
+			camera.updateProjectionMatrix();
 
 			cameraTarget.copy(center);
 			cameraDistance = paddedDistance;
+			minCameraDistance = Math.max(0.1, paddedDistance * 0.02);
+			maxCameraDistance = Math.max(minCameraDistance * 2, paddedDistance * 20);
 			cameraRotation.theta = Math.PI / 4;
 			cameraRotation.phi = Math.PI / 4;
 			updateCameraPosition();

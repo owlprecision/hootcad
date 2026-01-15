@@ -10,8 +10,10 @@ VS Code and Cursor extension to view and render JSCAD files in 3D
 - **Smart Entrypoint Resolution** - Automatically finds your JSCAD entrypoint via package.json, index.jscad, or active editor
 - **Interactive 3D Viewer** - WebGL-based rendering with camera controls (rotate with mouse drag, zoom with mouse wheel)
 - **Export to Multiple Formats** - Export your JSCAD models to STL, OBJ, AMF, DXF, SVG, JSON, and X3D formats
+- **MCP Validation Server** - Optional local server for coding agents to safely evaluate math and validate models
 - **HootCAD: Open Preview** command to open a preview panel
 - **HootCAD: Export** command to export models to various formats
+- **HootCAD: Enable MCP Server** command to enable agent integration
 - Activates automatically when opening `.jscad` files
 - Output channel "HootCAD" for logging and error messages
 - Status bar indicator showing current file and execution status
@@ -87,6 +89,52 @@ HootCAD supports exporting to the following formats using official JSCAD seriali
 8. You'll be notified when the export completes
 
 The export command automatically resolves the JSCAD entrypoint using the same logic as the preview command.
+
+## MCP Validation Server (Optional)
+
+HootCAD includes an optional Model Context Protocol (MCP) server that provides safe math evaluation for coding agents. This feature enables agents to:
+- Safely evaluate numeric expressions without arbitrary code execution
+- Validate dimensional math and spatial relationships
+- Perform sanity checks on CAD parameters
+- Support agent validation workflows
+
+### Enabling the MCP Server
+
+1. **Via Command**: Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac) and run **HootCAD: Enable MCP Server**
+2. **Via Prompt**: The extension will prompt you to enable the server the first time you open a preview
+
+When enabled, the extension will provide configuration instructions for integrating with your coding agent.
+
+### Security Model
+
+The MCP server is designed with security as the top priority:
+- ✅ No arbitrary code execution (no `eval`, no `Function` constructor)
+- ✅ No filesystem, environment variable, or VS Code API access
+- ✅ No network access
+- ✅ All inputs validated and treated as untrusted
+- ✅ Expression length and complexity limits enforced
+- ✅ Uses mathjs with dangerous APIs explicitly disabled
+
+### Available Tools
+
+**`math.eval`** - Safely evaluate pure numeric expressions (recommended for derived CAD dimensions)
+- Supports basic arithmetic (`+`, `-`, `*`, `/`, `%`)
+- Exponentiation using `^` operator or `pow()` function
+- Whitelisted math functions (sqrt, abs, sin, cos, etc.)
+- Optional variable substitution
+- Returns finite numeric results only
+
+Example usage by coding agents:
+```json
+{
+  "tool": "math.eval",
+  "arguments": {
+    "expr": "sqrt(x^2 + y^2)",
+    "vars": { "x": 3, "y": 4 }
+  }
+}
+// Returns: { "value": 5 }
+```
 
 ## Development
 
@@ -264,7 +312,11 @@ For maximum distribution, the extension can be published to both marketplaces:
 ## Project Structure
 
 - `src/extension.ts` - Main extension code and webview management
+- `src/extensionLifecycle.ts` - Extension lifecycle, commands, and file watchers
+- `src/mcpManager.ts` - MCP server lifecycle management
+- `src/mcpServer.ts` - MCP server implementation with safe math evaluation
 - `src/jscadEngine.ts` - JSCAD execution and geometry serialization
+- `src/webviewManager.ts` - Webview panel lifecycle and messaging
 - `examples/` - Sample JSCAD files
 - `package.json` - Extension manifest
 - `tsconfig.json` - TypeScript configuration
@@ -285,6 +337,10 @@ This is a v0.5 implementation focused on core rendering functionality:
 - Export to STL, OBJ, AMF, DXF, SVG, JSON, and X3D formats
 - Format-specific export options
 - Interactive parameter UI (`getParameterDefinitions`)
+- **MCP Validation Server**: Optional local server for coding agents
+  - Safe math expression evaluation (`math.eval` tool)
+  - Security-hardened with no code execution
+  - Support for agent validation workflows
 
 ❌ **Not yet implemented (future milestones):**
 - Multi-file dependency tracking
@@ -292,3 +348,4 @@ This is a v0.5 implementation focused on core rendering functionality:
 - Export to STEP format (requires OpenCascade integration)
 - Advanced rendering (lighting, materials, shadows)
 - 2D geometry rendering optimization
+- Advanced MCP tools (geometry validation, constraint checking)

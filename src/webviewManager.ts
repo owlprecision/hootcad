@@ -136,6 +136,12 @@ export class WebviewManager {
 	async executeAndRender(filePath: string): Promise<void> {
 		let lastParams: Record<string, any> | undefined;
 		try {
+			const isFileChange = this.currentEntrypoint !== filePath;
+			this.currentEntrypoint = filePath;
+			if (this.currentPanel) {
+				this.currentPanel.title = formatPreviewTitle(filePath);
+			}
+
 			this.errorReporter.logInfo(`Executing JSCAD file: ${filePath}`);
 			this.statusBarItem.text = "HootCAD: Executing...";
 
@@ -150,6 +156,9 @@ export class WebviewManager {
 			const entities = await executeJscadFile(filePath, this.errorReporter.getOutputChannel(), params);
 
 			if (this.currentPanel) {
+				if (isFileChange) {
+					this.currentPanel.webview.postMessage({ type: 'resetView' });
+				}
 				// Send both entities and parameter UI data to webview
 				this.currentPanel.webview.postMessage({
 					type: 'renderEntities',

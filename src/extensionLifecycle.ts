@@ -5,6 +5,8 @@ import { ParameterCache } from './parameterCache';
 import { resolveJscadEntrypoint } from './jscadEngine';
 import { extractFilename } from './utilities';
 import { executeExportCommand } from './exportCommand';
+import { McpManager } from './mcpManager';
+import { HootcadMcpServerDefinitionProvider } from './mcpDefinitionProvider';
 
 /**
  * Manages extension lifecycle, commands, and file watchers
@@ -13,6 +15,8 @@ export class ExtensionLifecycle {
 	private context: vscode.ExtensionContext;
 	private errorReporter: ErrorReporter;
 	private webviewManager: WebviewManager;
+	private mcpManager: McpManager;
+	private mcpDefinitionProvider: HootcadMcpServerDefinitionProvider | undefined;
 	private statusBarItem: vscode.StatusBarItem;
 	private outputChannel: vscode.OutputChannel;
 
@@ -38,6 +42,26 @@ export class ExtensionLifecycle {
 
 		// Initialize webview manager
 		this.webviewManager = new WebviewManager(context, this.errorReporter, parameterCache, this.statusBarItem);
+		
+		// Initialize MCP manager
+		this.mcpManager = new McpManager(context, this.outputChannel);
+		context.subscriptions.push(this.mcpManager);
+
+		// Register MCP server definition provider (if supported by this VS Code version)
+		this.registerMcpServerDefinitionProvider();
+	}
+
+	private registerMcpServerDefinitionProvider(): void {
+		const lm: any = (vscode as any).lm;
+		if (!lm || typeof lm.registerMcpServerDefinitionProvider !== 'function') {
+			this.outputChannel.appendLine('MCP server definition provider API not available in this VS Code version');
+			return;
+		}
+
+		this.mcpDefinitionProvider = new HootcadMcpServerDefinitionProvider(this.context);
+		const disposable = lm.registerMcpServerDefinitionProvider('hootcad.mcp-servers', this.mcpDefinitionProvider);
+		this.context.subscriptions.push(disposable);
+		this.outputChannel.appendLine('Registered MCP server definition provider: hootcad.mcp-servers');
 	}
 
 	/**
@@ -47,6 +71,9 @@ export class ExtensionLifecycle {
 		this.registerCommands();
 		this.registerFileWatchers();
 		this.registerEditorWatchers();
+
+		// If the user already opted in previously, start MCP automatically.
+		void this.mcpManager.startIfEnabled();
 	}
 
 	/**
@@ -56,6 +83,9 @@ export class ExtensionLifecycle {
 		const openPreviewCommand = vscode.commands.registerCommand('hootcad.openPreview', async () => {
 			this.errorReporter.logInfo('Opening HootCAD preview...');
 			await this.webviewManager.createOrShowPreview();
+			
+			// Show MCP enablement prompt on first preview
+			await this.mcpManager.showEnablementPrompt();
 		});
 		this.context.subscriptions.push(openPreviewCommand);
 
@@ -64,6 +94,13 @@ export class ExtensionLifecycle {
 			await executeExportCommand(this.errorReporter, this.outputChannel);
 		});
 		this.context.subscriptions.push(exportCommand);
+		
+		const enableMcpCommand = vscode.commands.registerCommand('hootcad.enableMcp', async () => {
+			this.errorReporter.logInfo('Enabling MCP Validation Server...');
+			await this.mcpManager.enableMcpServer();
+			this.mcpDefinitionProvider?.refresh();
+		});
+		this.context.subscriptions.push(enableMcpCommand);
 	}
 
 	/**
