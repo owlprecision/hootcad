@@ -70,7 +70,7 @@ export class WebviewManager {
 				enableScripts: true,
 				retainContextWhenHidden: true,
 				localResourceRoots: [
-					vscode.Uri.joinPath(this.context.extensionUri, 'src', 'webview')
+					vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview')
 				]
 			}
 		);

@@ -3,6 +3,7 @@
 'use strict';
 
 const path = require('path');
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 /** @typedef {import('webpack').Configuration} WebpackConfig **/
 
@@ -46,4 +47,40 @@ const extensionConfig = {
     level: "log", // enables logging required for problem matchers
   },
 };
-module.exports = [ extensionConfig ];
+
+/** @type WebpackConfig */
+const webviewConfig = {
+  target: 'web', // Webview code runs in a web context
+  mode: 'none',
+  
+  entry: './src/webview/renderer-entry.js', // the entry point for the webview
+  output: {
+    path: path.resolve(__dirname, 'dist', 'webview'),
+    filename: 'renderer.js',
+    libraryTarget: 'module',
+  },
+  experiments: {
+    outputModule: true, // Enable ES module output
+  },
+  resolve: {
+    extensions: ['.js'],
+    alias: {
+      // Ensure three.js is resolved from node_modules
+      'three': path.resolve(__dirname, 'node_modules/three/build/three.module.js')
+    }
+  },
+  plugins: [
+    new CopyWebpackPlugin({
+      patterns: [
+        { from: 'src/webview/renderer.html', to: 'renderer.html' },
+        { from: 'src/webview/preview.css', to: 'preview.css' }
+      ]
+    })
+  ],
+  devtool: 'nosources-source-map',
+  infrastructureLogging: {
+    level: "log",
+  },
+};
+
+module.exports = [ extensionConfig, webviewConfig ];

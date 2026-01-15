@@ -4,7 +4,6 @@ out/**
 node_modules/**
 !node_modules/@jscad/**
 src/**
-!src/webview/**
 .gitignore
 .yarnrc
 webpack.config.js
@@ -13,6 +12,4 @@ vsc-extension-quickstart.md
 **/eslint.config.mjs
 **/*.map
 **/*.ts
-!src/webview/*.js
-!src/webview/*.css
 **/.vscode-test.*

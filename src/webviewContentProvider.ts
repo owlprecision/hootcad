@@ -17,67 +17,18 @@ export class WebviewContentProvider {
 	 * Generate complete HTML content for the webview
 	 */
 	getWebviewContent(webview: vscode.Webview): string {
-		const threeUri = this.getThreeJsUri(webview);
-		const converterUri = this.getConverterUri(webview);
-		const parameterUIUri = this.getParameterUIUri(webview);
 		const rendererUri = this.getRendererUri(webview);
 		const stylesUri = this.getPreviewCssUri(webview);
 
 		const nonce = this.generateNonce();
-		const config = {
-			threeUri: threeUri.toString(),
-			converterUri: converterUri.toString(),
-			parameterUIUri: parameterUIUri.toString()
-		};
-		const encodedConfig = encodeURIComponent(JSON.stringify(config));
 
 		const template = this.readRendererHtmlTemplate();
 		return this.applyTemplate(template, {
 			'{{cspSource}}': webview.cspSource,
 			'{{nonce}}': nonce,
 			'{{rendererUri}}': rendererUri.toString(),
-			'{{stylesUri}}': stylesUri.toString(),
-			'{{config}}': encodedConfig
+			'{{stylesUri}}': stylesUri.toString()
 		});
-	}
-
-	/**
-	 * Get the webview URI for Three.js module
-	 */
-	private getThreeJsUri(webview: vscode.Webview): vscode.Uri {
-		const threePath = vscode.Uri.joinPath(
-			this.context.extensionUri,
-			'src',
-			'webview',
-			'three.module.js'
-		);
-		return webview.asWebviewUri(threePath);
-	}
-
-	/**
-	 * Get the webview URI for converter module
-	 */
-	private getConverterUri(webview: vscode.Webview): vscode.Uri {
-		const converterPath = vscode.Uri.joinPath(
-			this.context.extensionUri,
-			'src',
-			'webview',
-			'converter.js'
-		);
-		return webview.asWebviewUri(converterPath);
-	}
-
-	/**
-	 * Get the webview URI for parameter UI module
-	 */
-	private getParameterUIUri(webview: vscode.Webview): vscode.Uri {
-		const parameterUIPath = vscode.Uri.joinPath(
-			this.context.extensionUri,
-			'src',
-			'webview',
-			'parameterUI.js'
-		);
-		return webview.asWebviewUri(parameterUIPath);
 	}
 
 	/**
@@ -86,7 +37,7 @@ export class WebviewContentProvider {
 	private getRendererUri(webview: vscode.Webview): vscode.Uri {
 		const rendererPath = vscode.Uri.joinPath(
 			this.context.extensionUri,
-			'src',
+			'dist',
 			'webview',
 			'renderer.js'
 		);
@@ -99,7 +50,7 @@ export class WebviewContentProvider {
 	private getPreviewCssUri(webview: vscode.Webview): vscode.Uri {
 		const cssPath = vscode.Uri.joinPath(
 			this.context.extensionUri,
-			'src',
+			'dist',
 			'webview',
 			'preview.css'
 		);
@@ -112,7 +63,7 @@ export class WebviewContentProvider {
 	private readRendererHtmlTemplate(): string {
 		const templatePath = path.join(
 			this.context.extensionPath,
-			'src',
+			'dist',
 			'webview',
 			'renderer.html'
 		);

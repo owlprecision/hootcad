@@ -45,8 +45,8 @@ suite('Webview Content Validation', () => {
 	});
 
 	test('Generated HTML should have valid JavaScript syntax', () => {
-		// Parse the external renderer entry module from disk (authoritative correctness check)
-		const rendererPath = path.join(extensionPath, 'src', 'webview', 'renderer.js');
+		// Parse the bundled renderer entry module from disk (authoritative correctness check)
+		const rendererPath = path.join(extensionPath, 'dist', 'webview', 'renderer.js');
 		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
 
 		parse(rendererCode, {
@@ -63,7 +63,7 @@ suite('Webview Content Validation', () => {
 	});
 
 	test('Generated HTML should not contain syntax errors in string concatenation', () => {
-		const rendererPath = path.join(extensionPath, 'src', 'webview', 'renderer.js');
+		const rendererPath = path.join(extensionPath, 'dist', 'webview', 'renderer.js');
 		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
 
 		// Check that status messages are properly formatted
@@ -89,7 +89,7 @@ suite('Webview Content Validation', () => {
 		assert.ok(html.includes('id="parameter-content"'), 'Should have parameter content');
 	});
 
-	test('Generated HTML should properly import Three.js modules', () => {
+	test('Generated HTML should properly bundle Three.js modules', () => {
 		const mockWebview = createMockWebview();
 		const html = provider.getWebviewContent(mockWebview);
 
@@ -103,12 +103,14 @@ suite('Webview Content Validation', () => {
 			'Should reference external stylesheet'
 		);
 
-		// Check that renderer.js is set up to load the modules
-		const rendererPath = path.join(extensionPath, 'src', 'webview', 'renderer.js');
+		// Check that bundled renderer.js contains THREE.js code
+		const rendererPath = path.join(extensionPath, 'dist', 'webview', 'renderer.js');
 		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
-		assert.ok(rendererCode.includes('await import(config.threeUri)'), 'Should import THREE.js via config');
-		assert.ok(rendererCode.includes('await import(config.converterUri)'), 'Should import converter via config');
-		assert.ok(rendererCode.includes('await import(config.parameterUIUri)'), 'Should import parameter UI via config');
+		// The bundled file should contain THREE.js code (check for a unique THREE.js export)
+		assert.ok(
+			rendererCode.includes('WebGLRenderer') || rendererCode.includes('PerspectiveCamera'),
+			'Should bundle THREE.js code'
+		);
 	});
 });
 
