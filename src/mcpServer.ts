@@ -1,9 +1,9 @@
 /**
- * MCP Server for HootCAD - Safe Math Evaluation
+ * MCP Server for HootCAD - Safe Math Evaluation and CAD Advice
  * 
  * This server exposes safe, deterministic math evaluation capabilities
- * for agent validation loops. It does NOT execute arbitrary code or
- * perform CAD operations directly.
+ * and CAD design advice for agent validation loops. It does NOT execute 
+ * arbitrary code or perform CAD operations directly.
  * 
  * Security Model:
  * - No arbitrary code execution (no eval, no Function constructor)
@@ -21,6 +21,9 @@ import {
 	McpError,
 	ErrorCode
 } from '@modelcontextprotocol/sdk/types.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { MCP_SERVER_VERSION } from './mcpVersion';
 
 // Use require for mathjs to work around ESM/CommonJS interop issues in the bundled output.
 // Webpack will bundle mathjs correctly when using require(), while using ES6 import causes
@@ -120,6 +123,61 @@ function createSecureMathEvaluator(): (expr: string, scope?: Record<string, numb
 }
 
 /**
+ * Load CAD advice from markdown files
+ * 
+ * Reads advice content from the advice directory. Categories are defined
+ * by markdown filenames (e.g., general.md, dfm.md, jscad-specific.md).
+ * 
+ * @param category Optional category name. If not provided, returns general advice.
+ * @returns The complete markdown content as a string
+ */
+function loadCadAdvice(category?: string): string {
+	// Default to general advice if no category specified
+	const categoryName = category || 'general';
+	
+	// Validate category name to prevent path traversal attacks
+	// Only allow lowercase letters, numbers, and hyphens
+	const validCategoryPattern = /^[a-z0-9-]+$/;
+	if (!validCategoryPattern.test(categoryName)) {
+		throw new Error(`Invalid category name: ${categoryName}. Category names must contain only lowercase letters, numbers, and hyphens.`);
+	}
+	
+	// Construct path to advice file
+	// When bundled, advice files are in the same directory as mcpServer.js
+	const adviceDir = path.join(__dirname, 'advice');
+	const adviceFile = path.join(adviceDir, `${categoryName}.md`);
+	
+	// Check if file exists
+	if (!fs.existsSync(adviceFile)) {
+		const availableCategories = getAvailableCategories();
+		throw new Error(`Unknown advice category: ${categoryName}. Available categories: ${availableCategories.join(', ')}`);
+	}
+	
+	// Read and return the markdown content as-is to preserve formatting
+	const content = fs.readFileSync(adviceFile, 'utf-8');
+	return content;
+}
+
+/**
+ * Get list of available advice categories
+ */
+function getAvailableCategories(): string[] {
+	const adviceDir = path.join(__dirname, 'advice');
+	
+	// If directory doesn't exist, return empty array
+	if (!fs.existsSync(adviceDir)) {
+		return [];
+	}
+	
+	// Read all .md files in the advice directory
+	const files = fs.readdirSync(adviceDir);
+	return files
+		.filter(file => file.endsWith('.md'))
+		.map(file => file.replace('.md', ''))
+		.sort();
+}
+
+/**
  * Initialize and start the MCP server
  */
 async function main(): Promise<void> {
@@ -130,7 +188,7 @@ async function main(): Promise<void> {
 	const server = new Server(
 		{
 			name: 'hootcad-mcp',
-			version: '0.1.0'
+			version: MCP_SERVER_VERSION
 		},
 		{
 			capabilities: {
@@ -139,16 +197,43 @@ async function main(): Promise<void> {
 		}
 	);
 	
-	// Register tool: math.eval
+	// Register tools
 	server.setRequestHandler(ListToolsRequestSchema, async () => {
 		return {
 			tools: [
 				{
-					name: 'math.eval',
+					name: 'cad_advice',
 					description: [
-						'CAD helper: validate derived numeric values before finalizing geometry.',
-						'Use this for computations that affect geometry: distances, offsets, clearances, bounding extents, angles/camber (degrees↔radians), trig, sqrt, pi, chained transforms, pattern spacing, unit conversions.',
-						'Workflow: put the exact expression you plan to use in code into expr, pass named variables in vars, then use the returned numeric value. Avoid mental math for final dimensions.',
+						'CRITICAL: Call this tool FIRST before starting ANY CAD-related work (writing JSCAD code, designing 3D models, or planning geometry).',
+						'This tool provides essential guidance for CAD design, JSCAD programming, and manufacturability.',
+						'Returns expert advice as an array of text lines covering best practices, common patterns, and critical considerations.',
+						'Always review the advice before writing code to avoid common mistakes and ensure design quality.'
+					].join(' '),
+					inputSchema: {
+						type: 'object',
+						properties: {
+							category: {
+								type: 'string',
+								description: [
+									'Optional advice category. Available categories:',
+									'- "general" (default): Core CAD advice, spatial reasoning, JSCAD primitives, and cad_math usage',
+									'- "dfm": Design for Manufacturing - 3D printing constraints, tolerances, clearances',
+									'- "jscad-specific": JSCAD syntax, module system, transforms, common gotchas',
+									'Omit this parameter to get general advice which includes the list of all available categories.',
+									'Category names must be lowercase alphanumeric with hyphens only.'
+								].join(' ')
+							}
+						}
+					}
+				},
+				{
+					name: 'cad_math',
+					description: [
+						'CAD helper: validate derived numeric values before finalizing geometry or transforms.',
+						'Use this for spatial reasoning: distances, offsets, alignments, clearances, bounding extents, angles/camber (degrees↔radians), trig, sqrt, pi, chained transforms, pattern spacing, unit conversions.',
+						'REQUIRED WORKFLOW for assemblies: for every part-to-part connection, compute the intended contact/overlap numerically (gap≈0 or overlap>0) and ONLY THEN choose translate/rotate values.',
+						'Examples: gap = (socketCenter - pegCenter) - (socketRadius - pegRadius); want gap<=0.1. Or: contact = (baseTopZ) - (domeBottomZ); want contact≈0.',
+						'Put the exact expression you plan to use in code into expr, pass named variables in vars, then use the returned numeric value. Avoid mental math for final dimensions.',
 						'Safe/deterministic: pure numeric math only (no code execution, no side effects).'
 					].join(' '),
 					inputSchema: {
@@ -168,30 +253,6 @@ async function main(): Promise<void> {
 							}
 						}
 					}
-				},
-				{
-					name: 'cad.eval',
-					description: [
-						'Alias of math.eval (same behavior), named for CAD workflows.',
-						'Use when computing derived dimensions or transforms (especially camber/angles and degree↔radian conversions).'
-					].join(' '),
-					inputSchema: {
-						type: 'object',
-						required: ['expr'],
-						properties: {
-							expr: {
-								type: 'string',
-								description: 'Pure numeric expression to evaluate. Prefer radians for angles.'
-							},
-							vars: {
-								type: 'object',
-								additionalProperties: {
-									type: 'number'
-								},
-								description: 'Optional named numeric variables.'
-							}
-						}
-					}
 				}
 			]
 		};
@@ -199,7 +260,56 @@ async function main(): Promise<void> {
 	
 	// Handle tool calls
 	server.setRequestHandler(CallToolRequestSchema, async (request) => {
-		if (request.params.name !== 'math.eval' && request.params.name !== 'cad.eval') {
+		// Handle CAD advice tool
+		if (request.params.name === 'cad_advice') {
+			const args = request.params.arguments as {
+				category?: unknown;
+			};
+			
+			// Validate optional category argument
+			let category: string | undefined;
+			if (args.category !== undefined) {
+				if (typeof args.category !== 'string') {
+					throw new McpError(
+						ErrorCode.InvalidParams,
+						'category must be a string'
+					);
+				}
+				category = args.category;
+			}
+			
+			try {
+				// Log tool invocation
+				console.error(`cad_advice called (category=${category || 'general'})`);
+				
+				// Load the advice
+				const adviceContent = loadCadAdvice(category);
+				const categories = getAvailableCategories();
+				
+				// Return advice as markdown text with metadata in JSON format
+				return {
+					content: [
+						{
+							type: 'text',
+							text: JSON.stringify({
+								category: category || 'general',
+								availableCategories: categories,
+								content: adviceContent
+							}, null, 2)
+						}
+					]
+				};
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				throw new McpError(
+					ErrorCode.InternalError,
+					`Failed to load CAD advice: ${errorMessage}`
+				);
+			}
+		}
+		
+		// Handle CAD math tool
+		if (request.params.name !== 'cad_math') {
 			throw new McpError(
 				ErrorCode.MethodNotFound,
 				`Unknown tool: ${request.params.name}`
@@ -236,7 +346,7 @@ async function main(): Promise<void> {
 			// Keep it minimal: no full expression contents.
 			const exprLen = args.expr.length;
 			const varCount = vars ? Object.keys(vars).length : 0;
-			console.error(`math.eval called (exprLen=${exprLen}, varCount=${varCount})`);
+			console.error(`cad_math called (exprLen=${exprLen}, varCount=${varCount})`);
 
 			// Evaluate the expression
 			const value = secureEval(args.expr, vars);

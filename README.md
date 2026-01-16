@@ -117,7 +117,26 @@ The MCP server is designed with security as the top priority:
 
 ### Available Tools
 
-**`math.eval`** - Safely evaluate pure numeric expressions (recommended for derived CAD dimensions)
+**`cad_advice`** - Get expert CAD design guidance (CALL THIS FIRST before any CAD work)
+- Provides essential guidance for CAD design, JSCAD programming, and manufacturability
+- Available categories:
+  - `general` (default): Core CAD advice, spatial reasoning, JSCAD primitives, emphasizes using cad_math
+  - `dfm`: Design for Manufacturing - 3D printing constraints, tolerances, clearances
+  - `jscad-specific`: JSCAD syntax, module system, transforms, common gotchas
+- Returns structured advice as markdown with metadata
+
+Example usage by coding agents:
+```json
+{
+  "tool": "cad_advice",
+  "arguments": {
+    "category": "general"
+  }
+}
+// Returns: { "category": "general", "availableCategories": [...], "content": "..." }
+```
+
+**`cad_math`** - Safely evaluate pure numeric expressions (recommended for derived CAD dimensions)
 - Supports basic arithmetic (`+`, `-`, `*`, `/`, `%`)
 - Exponentiation using `^` operator or `pow()` function
 - Whitelisted math functions (sqrt, abs, sin, cos, etc.)
@@ -127,7 +146,7 @@ The MCP server is designed with security as the top priority:
 Example usage by coding agents:
 ```json
 {
-  "tool": "math.eval",
+  "tool": "cad_math",
   "arguments": {
     "expr": "sqrt(x^2 + y^2)",
     "vars": { "x": 3, "y": 4 }
@@ -338,7 +357,7 @@ This is a v0.5 implementation focused on core rendering functionality:
 - Format-specific export options
 - Interactive parameter UI (`getParameterDefinitions`)
 - **MCP Validation Server**: Optional local server for coding agents
-  - Safe math expression evaluation (`math.eval` tool)
+  - Safe math expression evaluation (`cad_math` tool)
   - Security-hardened with no code execution
   - Support for agent validation workflows
 

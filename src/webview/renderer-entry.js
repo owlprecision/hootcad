@@ -154,9 +154,10 @@ import { updateParameterUI } from './parameterUI.js';
 
 		function updateCameraPosition() {
 			const sinPhi = Math.sin(cameraRotation.phi);
+			// Z-up camera orbit (JSCAD-style). theta rotates in XY, phi is polar angle from +Z.
 			camera.position.x = cameraTarget.x + cameraDistance * sinPhi * Math.cos(cameraRotation.theta);
-			camera.position.y = cameraTarget.y + cameraDistance * Math.cos(cameraRotation.phi);
-			camera.position.z = cameraTarget.z + cameraDistance * sinPhi * Math.sin(cameraRotation.theta);
+			camera.position.y = cameraTarget.y + cameraDistance * sinPhi * Math.sin(cameraRotation.theta);
+			camera.position.z = cameraTarget.z + cameraDistance * Math.cos(cameraRotation.phi);
 			camera.lookAt(cameraTarget);
 		}
 
@@ -166,8 +167,8 @@ import { updateParameterUI } from './parameterUI.js';
 			if (cameraDistance < 1e-6) {
 				return;
 			}
-			cameraRotation.theta = Math.atan2(offset.z, offset.x);
-			const cosPhi = offset.y / cameraDistance;
+			cameraRotation.theta = Math.atan2(offset.y, offset.x);
+			const cosPhi = offset.z / cameraDistance;
 			cameraRotation.phi = Math.acos(Math.max(-1, Math.min(1, cosPhi)));
 		}
 
@@ -325,7 +326,7 @@ import { updateParameterUI } from './parameterUI.js';
 			animationFrameId = requestAnimationFrame(animate);
 
 			if (floorMesh && floorMesh.visible && floorMaterial) {
-				const shouldGhost = camera.position.y < floorMesh.position.y;
+				const shouldGhost = camera.position.z < floorMesh.position.z;
 				if (shouldGhost !== isFloorGhosted) {
 					isFloorGhosted = shouldGhost;
 					if (isFloorGhosted) {
@@ -395,7 +396,7 @@ import { updateParameterUI } from './parameterUI.js';
 			if (!bounds) {
 				floorMesh.visible = false;
 				if (gridHelper) {
-					gridHelper.position.y = 0;
+					gridHelper.position.z = 0;
 				}
 				return;
 			}
@@ -408,14 +409,14 @@ import { updateParameterUI } from './parameterUI.js';
 			const desiredPlaneSize = Math.max(minPlaneSize, maxDim * 2);
 
 			floorMesh.visible = true;
-			floorMesh.position.y = box.min.y - floorOffset;
+			floorMesh.position.z = box.min.z - floorOffset;
 			if (gridHelper) {
-				gridHelper.position.y = floorMesh.position.y + gridOffsetAboveFloor;
+				gridHelper.position.z = floorMesh.position.z + gridOffsetAboveFloor;
 				const gridScale = desiredPlaneSize / GRID_SIZE;
 				gridHelper.scale.set(gridScale, 1, gridScale);
 			}
-			// Geometry vertices are rotated into the XZ plane, so scale X and Z.
-			floorMesh.scale.set(desiredPlaneSize, 1, desiredPlaneSize);
+			// Floor is an XY plane in Z-up world, so scale X and Y.
+			floorMesh.scale.set(desiredPlaneSize, desiredPlaneSize, 1);
 			isFloorGhosted = false;
 			if (floorMaterial) {
 				floorMaterial.transparent = false;
@@ -555,6 +556,7 @@ import { updateParameterUI } from './parameterUI.js';
 
 			const aspect = canvas.clientWidth / canvas.clientHeight;
 			camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+			camera.up.set(0, 0, 1);
 			camera.position.set(30, 30, 30);
 
 			cameraTarget.set(0, 0, 0);
@@ -585,7 +587,7 @@ import { updateParameterUI } from './parameterUI.js';
 			scene.add(ambientLight);
 
 			const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9aa6b2, LIGHTING_PRESET.hemiIntensity);
-			hemiLight.position.set(0, 1, 0);
+			hemiLight.position.set(0, 0, 1);
 			scene.add(hemiLight);
 
 			keyLight = new THREE.DirectionalLight(0xffffff, LIGHTING_PRESET.keyIntensity);
@@ -626,6 +628,8 @@ import { updateParameterUI } from './parameterUI.js';
 			scene.add(rimLight);
 
 			gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x8899aa, 0xc5d0dd);
+			// GridHelper is XZ by default (Y-up). Rotate into XY for Z-up.
+			gridHelper.rotateX(Math.PI / 2);
 			scene.add(gridHelper);
 
 			const axesHelper = new THREE.AxesHelper(100);
@@ -637,7 +641,6 @@ import { updateParameterUI } from './parameterUI.js';
 			// Floor plane (positioned dynamically per-model).
 			// Use a unit plane and scale it per render to avoid re-allocating geometry.
 			const floorGeometry = new THREE.PlaneGeometry(1, 1);
-			floorGeometry.rotateX(-Math.PI / 2);
 			floorMaterial = new THREE.MeshStandardMaterial({
 				color: 0xf7f7f7,
 				metalness: 0,

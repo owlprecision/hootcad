@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { MCP_SERVER_VERSION } from './mcpVersion';
 
 const CONFIG_KEY_ENABLED = 'hootcad.mcp.enabled';
 
@@ -32,11 +33,11 @@ export class HootcadMcpServerDefinitionProvider implements vscode.McpServerDefin
 
 		return [
 			new vscode.McpStdioServerDefinition(
-				'HootCAD Validation (math.eval)',
+				'HootCAD Tools',
 				command,
 				args,
 				{},
-				'0.1.0'
+				MCP_SERVER_VERSION
 			)
 		];
 	}

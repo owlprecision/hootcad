@@ -226,7 +226,7 @@ suite('MCP Server Test Suite', () => {
 	});
 
 	suite('MCP Protocol Integration (Bundled Server)', () => {
-		test('Should list tools and evaluate math.eval end-to-end', async function () {
+		test('Should list tools and evaluate cad_math end-to-end', async function () {
 			this.timeout(15000);
 
 			const mcpServerPath = getBundledMcpServerPath();
@@ -245,16 +245,16 @@ suite('MCP Server Test Suite', () => {
 				await client.connect(transport);
 				const toolsResult = await client.listTools();
 				assert.ok(
-					toolsResult.tools.some((t) => t.name === 'math.eval'),
-					'Expected math.eval tool to be exposed'
+					toolsResult.tools.some((t) => t.name === 'cad_math'),
+					'Expected cad_math tool to be exposed'
 				);
 				assert.ok(
-					toolsResult.tools.some((t) => t.name === 'cad.eval'),
-					'Expected cad.eval tool alias to be exposed'
+					toolsResult.tools.some((t) => t.name === 'cad_advice'),
+					'Expected cad_advice tool to be exposed'
 				);
 
 				const result: any = await client.callTool({
-					name: 'math.eval',
+					name: 'cad_math',
 					arguments: {
 						expr: 'sqrt(x^2 + y^2)',
 						vars: { x: 3, y: 4 }
@@ -380,6 +380,83 @@ suite('MCP Server Test Suite', () => {
 			// Circle circumference: 2 * PI * radius
 			const circumference = math.evaluate('2 * pi * radius', { radius: 5 });
 			assert.strictEqual(Math.round(circumference * 100) / 100, 31.42);
+		});
+	});
+
+	suite('CAD Advice Tool', () => {
+		test('Should load general advice by default', function () {
+			this.timeout(10000);
+			
+			// Load the advice loading function from the bundled server
+			const fs = require('fs');
+			const path = require('path');
+			const adviceDir = path.resolve(__dirname, '../../dist/advice');
+			const generalFile = path.join(adviceDir, 'general.md');
+			
+			// Verify the file exists
+			assert.ok(fs.existsSync(generalFile), 'general.md should exist in dist/advice');
+			
+			// Read and validate content
+			const content = fs.readFileSync(generalFile, 'utf-8');
+			assert.ok(content.length > 0, 'general.md should not be empty');
+			assert.ok(content.includes('cad_math'), 'general.md should mention cad_math tool');
+			assert.ok(content.includes('Available advice categories'), 'general.md should list categories');
+		});
+
+		test('Should load DFM advice', function () {
+			this.timeout(10000);
+			
+			const fs = require('fs');
+			const path = require('path');
+			const adviceDir = path.resolve(__dirname, '../../dist/advice');
+			const dfmFile = path.join(adviceDir, 'dfm.md');
+			
+			// Verify the file exists
+			assert.ok(fs.existsSync(dfmFile), 'dfm.md should exist in dist/advice');
+			
+			// Read and validate content
+			const content = fs.readFileSync(dfmFile, 'utf-8');
+			assert.ok(content.length > 0, 'dfm.md should not be empty');
+			assert.ok(content.toLowerCase().includes('3d print'), 'dfm.md should mention 3D printing');
+			assert.ok(content.toLowerCase().includes('tolerance'), 'dfm.md should mention tolerances');
+		});
+
+		test('Should load JSCAD-specific advice', function () {
+			this.timeout(10000);
+			
+			const fs = require('fs');
+			const path = require('path');
+			const adviceDir = path.resolve(__dirname, '../../dist/advice');
+			const jscadFile = path.join(adviceDir, 'jscad-specific.md');
+			
+			// Verify the file exists
+			assert.ok(fs.existsSync(jscadFile), 'jscad-specific.md should exist in dist/advice');
+			
+			// Read and validate content
+			const content = fs.readFileSync(jscadFile, 'utf-8');
+			assert.ok(content.length > 0, 'jscad-specific.md should not be empty');
+			assert.ok(content.includes('JSCAD') || content.includes('jscad'), 'jscad-specific.md should mention JSCAD');
+			assert.ok(content.includes('require'), 'jscad-specific.md should mention CommonJS require');
+		});
+
+		test('Should have all expected categories', function () {
+			this.timeout(10000);
+			
+			const fs = require('fs');
+			const path = require('path');
+			const adviceDir = path.resolve(__dirname, '../../dist/advice');
+			
+			// Check that all expected files exist
+			const expectedCategories = ['general', 'dfm', 'jscad-specific'];
+			for (const category of expectedCategories) {
+				const file = path.join(adviceDir, `${category}.md`);
+				assert.ok(fs.existsSync(file), `${category}.md should exist`);
+			}
+			
+			// List all .md files
+			const files = fs.readdirSync(adviceDir);
+			const mdFiles = files.filter((f: string) => f.endsWith('.md'));
+			assert.strictEqual(mdFiles.length, 3, 'Should have exactly 3 advice files');
 		});
 	});
 });

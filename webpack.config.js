@@ -113,6 +113,13 @@ const mcpServerConfig = {
       }
     ]
   },
+  plugins: [
+    new CopyWebpackPlugin({
+      patterns: [
+        { from: 'src/advice', to: 'advice' }
+      ]
+    })
+  ],
   devtool: 'nosources-source-map',
   infrastructureLogging: {
     level: "log",

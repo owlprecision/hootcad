@@ -274,7 +274,7 @@ Example:
   }
 }
 
-The server exposes a "math.eval" tool for safe numeric expression evaluation.
+The server exposes a "cad_math" tool for safe numeric expression evaluation.
 `;
 	}
 
