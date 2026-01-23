@@ -469,10 +469,8 @@ import { InputController } from './inputController.js';
 			camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
 			camera.up.set(0, 0, 1);
 			camera.position.set(30, 30, 30);
+			camera.lookAt(0, 0, 0);
 
-			cameraTarget.set(0, 0, 0);
-			camera.lookAt(cameraTarget);
-			syncControlsFromCamera();
 
 			renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 			renderer.setSize(canvas.clientWidth, canvas.clientHeight);
@@ -573,8 +571,8 @@ import { InputController } from './inputController.js';
 				maxDistance: 200
 			});
 			
-			// Sync controller from initial camera position
-			cameraController.syncFromCamera();
+			// Update camera position based on controller settings
+			cameraController.updatePosition();
 			
 			// Initialize input controller
 			inputController = new InputController(canvas, cameraController, {

@@ -26,7 +26,8 @@ export class CameraController {
 		this.camera.position.y = this.target.y + this.distance * sinPhi * Math.sin(this.rotation.theta);
 		this.camera.position.z = this.target.z + this.distance * Math.cos(this.rotation.phi);
 		// THREE.js lookAt accepts objects with x, y, z properties
-		this.camera.lookAt(this.target);
+		this.camera.lookAt(this.target.x, this.target.y, this.target.z);
+		this.camera.updateMatrixWorld();
 	}
 
 	/**
