@@ -19,6 +19,10 @@ class MockCamera {
 	updateProjectionMatrix() {
 		// Mock implementation
 	}
+	
+	updateMatrixWorld() {
+		// Mock implementation
+	}
 }
 
 // Import the CameraController
