@@ -92,6 +92,7 @@ jobs:
   publish:
     needs: build
     if: >
+      github.repository_owner == 'owlprecision' &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' ||
        github.ref == 'refs/heads/master')
