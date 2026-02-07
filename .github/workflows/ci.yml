@@ -115,3 +115,25 @@ jobs:
           prerelease: false
           files: '*.vsix'
           generate_release_notes: true
+
+  publish-marketplace:
+    needs: build
+    if: >
+      github.repository_owner == 'owlprecision' &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hootcad-vsix
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --packagePath *.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PUBLISH_OWLPRECISION }}
