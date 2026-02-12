@@ -28,15 +28,15 @@ Traditional CAD tools treat designs as opaque binary files. HootCAD embraces a d
 
 ## Installation
 
-### From Releases (Recommended)
+Install directly from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=owlprecision.hootcad):
 
-1. Download the latest `.vsix` file from [Releases](https://github.com/joelmartinez/hootcad/releases)
-2. Open VS Code or Cursor
-3. Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac)
-4. Type "Extensions: Install from VSIX..."
-5. Select the downloaded file
+1. Open VS Code or Cursor
+2. Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac)
+3. Type "Extensions: Install Extensions"
+4. Search for "HootCAD"
+5. Click Install
 
-*Publishing to VS Code Marketplace and OpenVSX coming soon.*
+Or install with one click from the [marketplace page](https://marketplace.visualstudio.com/items?itemName=owlprecision.hootcad).
 
 ## Quick Start
 
@@ -61,7 +61,7 @@ Traditional CAD tools treat designs as opaque binary files. HootCAD embraces a d
 
 5. Export to STL, OBJ, or other formats via **HootCAD: Export**
 
-💡 Check the `examples/` directory for more sample models.
+💡 Check the [examples](https://github.com/owlprecision/hootcad/tree/main/examples) directory for more sample models.
 
 ## Available Commands
 
@@ -83,44 +83,12 @@ HootCAD includes an optional **Model Context Protocol (MCP) server** for AI codi
 
 Enable via **HootCAD: Enable MCP Server** command when prompted. The extension provides setup instructions for your coding agent.
 
-## Contributing
+## Support & Contributing
 
-We welcome contributions! HootCAD is gearing up for its first major release.
-
-**To contribute:**
-
-1. Check [existing issues](https://github.com/joelmartinez/hootcad/issues) or open a new one
-2. Fork the repository and create a feature branch
-3. See [ARCHITECTURE.md](./ARCHITECTURE.md) for codebase structure
-4. Submit a pull request
-
-**Development setup:**
-```bash
-git clone https://github.com/joelmartinez/hootcad
-cd hootcad
-npm install
-```
-
-Press `F5` in VS Code to launch the Extension Development Host. See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed development information.
-
-## Roadmap
-
-HootCAD's vision is to bring professional software engineering workflows to CAD:
-
-- ✅ **Phase 1-2**: Core rendering and parametric UI (Complete)
-- 🔄 **Phase 3**: Enhanced rendering quality
-- 🔄 **Phase 4**: Production export workflows and automation
-- 🔄 **Phase 5**: TypeScript CAD (`.tscad`) support
-- 🔄 **Future**: OpenCascade integration, advanced AI workflows
-
-See [ROADMAP.md](./ROADMAP.md) for details.
+- **Report Issues**: [GitHub Issues](https://github.com/owlprecision/hootcad/issues)
+- **Source Code**: [github.com/owlprecision/hootcad](https://github.com/owlprecision/hootcad)
+- **Contributing**: See [CONTRIBUTING.md](https://github.com/owlprecision/hootcad/blob/main/CONTRIBUTING.md)
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Links
-
-- **Repository**: [github.com/joelmartinez/hootcad](https://github.com/joelmartinez/hootcad)
-- **Issues**: [Report bugs or request features](https://github.com/joelmartinez/hootcad/issues)
-- **Releases**: [Download latest version](https://github.com/joelmartinez/hootcad/releases)
+MIT License - see [LICENSE](https://github.com/owlprecision/hootcad/blob/main/LICENSE) file for details
