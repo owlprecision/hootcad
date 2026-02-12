@@ -46,7 +46,7 @@ HootCAD uses a modular architecture with clear separation of concerns. Each modu
 ## Development Setup
 
 ```bash
-git clone https://github.com/joelmartinez/hootcad
+git clone https://github.com/owlprecision/hootcad
 cd hootcad
 npm install
 ```

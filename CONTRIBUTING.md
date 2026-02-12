@@ -6,7 +6,7 @@ Thank you for your interest in contributing to HootCAD! This guide will help you
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/joelmartinez/hootcad
+   git clone https://github.com/owlprecision/hootcad
    cd hootcad
    ```
 
@@ -75,4 +75,4 @@ This ensures clients with cached metadata refresh to see updated tools.
 
 ## Questions?
 
-Open an issue for questions or discussion: [github.com/joelmartinez/hootcad/issues](https://github.com/joelmartinez/hootcad/issues)
+Open an issue for questions or discussion: [github.com/owlprecision/hootcad/issues](https://github.com/owlprecision/hootcad/issues)
