@@ -13,16 +13,11 @@
  * - Uses mathjs with locked-down configuration
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-	CallToolRequestSchema,
-	ListToolsRequestSchema,
-	McpError,
-	ErrorCode
-} from '@modelcontextprotocol/sdk/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as z from 'zod/v4';
 import { MCP_SERVER_VERSION } from './mcpVersion';
 
 // Use require for mathjs to work around ESM/CommonJS interop issues in the bundled output.
@@ -185,7 +180,7 @@ async function main(): Promise<void> {
 	const secureEval = createSecureMathEvaluator();
 	
 	// Create MCP server
-	const server = new Server(
+	const server = new McpServer(
 		{
 			name: 'hootcad-mcp',
 			version: MCP_SERVER_VERSION
@@ -193,181 +188,97 @@ async function main(): Promise<void> {
 		{
 			capabilities: {
 				tools: {}
-			}
+			},
+			instructions: [
+				'When authoring or modifying .jscad files, you MUST call cad_advice before starting work to ensure proper geometry and best practices.',
+				'Use cad_math to validate all derived dimensions, offsets, and spatial relationships before writing geometry code.',
+				'For assemblies with joints (revolute, prismatic, etc.), always compute contact points and clearances with cad_math first.'
+			].join('\n')
 		}
 	);
-	
-	// Register tools
-	server.setRequestHandler(ListToolsRequestSchema, async () => {
-		return {
-			tools: [
-				{
-					name: 'cad_advice',
-					description: [
-						'CRITICAL: Call this tool FIRST before starting ANY CAD-related work (writing JSCAD code, designing 3D models, or planning geometry).',
-						'This tool provides essential guidance for CAD design, JSCAD programming, and manufacturability.',
-						'Returns expert advice as an array of text lines covering best practices, common patterns, and critical considerations.',
-						'Always review the advice before writing code to avoid common mistakes and ensure design quality.'
-					].join(' '),
-					inputSchema: {
-						type: 'object',
-						properties: {
-							category: {
-								type: 'string',
-								description: [
-									'Optional advice category. Available categories:',
-									'- "general" (default): Core CAD advice, spatial reasoning, JSCAD primitives, and cad_math usage',
-									'- "dfm": Design for Manufacturing - 3D printing constraints, tolerances, clearances',
-									'- "jscad-specific": JSCAD syntax, module system, transforms, common gotchas',
-									'Omit this parameter to get general advice which includes the list of all available categories.',
-									'Category names must be lowercase alphanumeric with hyphens only.'
-								].join(' ')
-							}
-						}
-					}
-				},
-				{
-					name: 'cad_math',
-					description: [
-						'CAD helper: validate derived numeric values before finalizing geometry or transforms.',
-						'Use this for spatial reasoning: distances, offsets, alignments, clearances, bounding extents, angles/camber (degrees↔radians), trig, sqrt, pi, chained transforms, pattern spacing, unit conversions.',
-						'REQUIRED WORKFLOW for assemblies: for every part-to-part connection, compute the intended contact/overlap numerically (gap≈0 or overlap>0) and ONLY THEN choose translate/rotate values.',
-						'Examples: gap = (socketCenter - pegCenter) - (socketRadius - pegRadius); want gap<=0.1. Or: contact = (baseTopZ) - (domeBottomZ); want contact≈0.',
-						'Put the exact expression you plan to use in code into expr, pass named variables in vars, then use the returned numeric value. Avoid mental math for final dimensions.',
-						'Safe/deterministic: pure numeric math only (no code execution, no side effects).'
-					].join(' '),
-					inputSchema: {
-						type: 'object',
-						required: ['expr'],
-						properties: {
-							expr: {
-								type: 'string',
-								description: 'Pure numeric expression to evaluate. Prefer radians for angles. Example: "sqrt((x2-x1)^2 + (y2-y1)^2)" or "wheelbase/2 + tireRadius + clearance".'
-							},
-							vars: {
-								type: 'object',
-								additionalProperties: {
-									type: 'number'
-								},
-								description: 'Optional named numeric variables (CAD parameters, intermediate values). Example: {"wheelbase":120,"tireRadius":18,"clearance":2}.'
-							}
-						}
-					}
-				}
-			]
-		};
-	});
-	
-	// Handle tool calls
-	server.setRequestHandler(CallToolRequestSchema, async (request) => {
-		// Handle CAD advice tool
-		if (request.params.name === 'cad_advice') {
-			const args = request.params.arguments as {
-				category?: unknown;
-			};
-			
-			// Validate optional category argument
-			let category: string | undefined;
-			if (args.category !== undefined) {
-				if (typeof args.category !== 'string') {
-					throw new McpError(
-						ErrorCode.InvalidParams,
-						'category must be a string'
-					);
-				}
-				category = args.category;
-			}
-			
-			try {
-				// Log tool invocation
-				console.error(`cad_advice called (category=${category || 'general'})`);
-				
-				// Load the advice
-				const adviceContent = loadCadAdvice(category);
-				const categories = getAvailableCategories();
-				
-				// Return advice as markdown text with metadata in JSON format
-				return {
-					content: [
-						{
-							type: 'text',
-							text: JSON.stringify({
-								category: category || 'general',
-								availableCategories: categories,
-								content: adviceContent
-							}, null, 2)
-						}
-					]
-				};
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				throw new McpError(
-					ErrorCode.InternalError,
-					`Failed to load CAD advice: ${errorMessage}`
-				);
-			}
-		}
-		
-		// Handle CAD math tool
-		if (request.params.name !== 'cad_math') {
-			throw new McpError(
-				ErrorCode.MethodNotFound,
-				`Unknown tool: ${request.params.name}`
-			);
-		}
-		
-		const args = request.params.arguments as {
-			expr?: unknown;
-			vars?: unknown;
-		};
-		
-		// Validate required argument
-		if (typeof args.expr !== 'string') {
-			throw new McpError(
-				ErrorCode.InvalidParams,
-				'expr must be a string'
-			);
-		}
-		
-		// Validate optional vars argument
-		let vars: Record<string, number> | undefined;
-		if (args.vars !== undefined) {
-			if (typeof args.vars !== 'object' || args.vars === null || Array.isArray(args.vars)) {
-				throw new McpError(
-					ErrorCode.InvalidParams,
-					'vars must be an object'
-				);
-			}
-			vars = args.vars as Record<string, number>;
-		}
-		
-		try {
-			// Log tool invocation to stderr so it shows up in the extension OutputChannel.
-			// Keep it minimal: no full expression contents.
-			const exprLen = args.expr.length;
-			const varCount = vars ? Object.keys(vars).length : 0;
-			console.error(`cad_math called (exprLen=${exprLen}, varCount=${varCount})`);
 
-			// Evaluate the expression
-			const value = secureEval(args.expr, vars);
-			
+	server.registerTool(
+		'cad_advice',
+		{
+			description: [
+				'CRITICAL: Call this tool FIRST before starting ANY CAD-related work (writing JSCAD code, designing 3D models, or planning geometry).',
+				'This tool provides essential guidance for CAD design, JSCAD programming, and manufacturability.',
+				'Returns expert advice as an array of text lines covering best practices, common patterns, and critical considerations.',
+				'Always review the advice before writing code to avoid common mistakes and ensure design quality.'
+			].join(' '),
+			inputSchema: {
+				category: z.string().describe([
+					'Optional advice category. Available categories:',
+					'- "general" (default): Core CAD advice, spatial reasoning, JSCAD primitives, and cad_math usage',
+					'- "dfm": Design for Manufacturing - 3D printing constraints, tolerances, clearances',
+					'- "jscad-specific": JSCAD syntax, module system, transforms, common gotchas',
+					'Omit this parameter to get general advice which includes the list of all available categories.',
+					'Category names must be lowercase alphanumeric with hyphens only.'
+				].join(' ')).optional()
+			}
+		},
+		async (args: { category?: string }) => {
+			const category = args.category;
+
+			// Log tool invocation
+			console.error(`cad_advice called (category=${category || 'general'})`);
+
+			// Load the advice
+			const adviceContent = loadCadAdvice(category);
+			const categories = getAvailableCategories();
+
+			// Return advice as markdown text with metadata in JSON format
 			return {
 				content: [
 					{
 						type: 'text',
-						text: JSON.stringify({ value, expr: args.expr, vars })
+						text: JSON.stringify({
+							category: category || 'general',
+							availableCategories: categories,
+							content: adviceContent
+						}, null, 2)
 					}
 				]
 			};
-		} catch (error) {
-			// Return evaluation errors as tool errors, not MCP errors
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			throw new McpError(
-				ErrorCode.InternalError,
-				`Math evaluation failed: ${errorMessage}`
-			);
 		}
-	});
+	);
+
+	server.registerTool(
+		'cad_math',
+		{
+			description: [
+				'CAD helper: validate derived numeric values before finalizing geometry or transforms.',
+				'Use this for spatial reasoning: distances, offsets, alignments, clearances, bounding extents, angles/camber (degrees↔radians), trig, sqrt, pi, chained transforms, pattern spacing, unit conversions.',
+				'REQUIRED WORKFLOW for assemblies: for every part-to-part connection, compute the intended contact/overlap numerically (gap≈0 or overlap>0) and ONLY THEN choose translate/rotate values.',
+				'Examples: gap = (socketCenter - pegCenter) - (socketRadius - pegRadius); want gap<=0.1. Or: contact = (baseTopZ) - (domeBottomZ); want contact≈0.',
+				'Put the exact expression you plan to use in code into expr, pass named variables in vars, then use the returned numeric value. Avoid mental math for final dimensions.',
+				'Safe/deterministic: pure numeric math only (no code execution, no side effects).'
+			].join(' '),
+			inputSchema: {
+				expr: z.string().describe('Pure numeric expression to evaluate. Prefer radians for angles. Example: "sqrt((x2-x1)^2 + (y2-y1)^2)" or "wheelbase/2 + tireRadius + clearance".'),
+				vars: z.record(z.string(), z.number()).describe('Optional named numeric variables (CAD parameters, intermediate values). Example: {"wheelbase":120,"tireRadius":18,"clearance":2}.').optional()
+			}
+		},
+		async (typedArgs: { expr: string; vars?: Record<string, number> }) => {
+			// Log tool invocation to stderr so it shows up in the extension OutputChannel.
+			// Keep it minimal: no full expression contents.
+			const exprLen = typedArgs.expr.length;
+			const varCount = typedArgs.vars ? Object.keys(typedArgs.vars).length : 0;
+			console.error(`cad_math called (exprLen=${exprLen}, varCount=${varCount})`);
+
+			// Evaluate the expression
+			const value = secureEval(typedArgs.expr, typedArgs.vars);
+
+			return {
+				content: [
+					{
+						type: 'text',
+						text: JSON.stringify({ value, expr: typedArgs.expr, vars: typedArgs.vars })
+					}
+				]
+			};
+		}
+	);
 	
 	// Start server with stdio transport
 	const transport = new StdioServerTransport();
