@@ -40,7 +40,7 @@ Bring **professional software engineering workflows** to CAD - source control, a
 
 This roadmap is a living document. Contributions are welcome at any phase:
 
-1. Check [existing issues](https://github.com/joelmartinez/hootcad/issues)
+1. Check [existing issues](https://github.com/owlprecision/hootcad/issues)
 2. Open an issue to discuss your approach
 3. Submit a PR with your implementation
 
