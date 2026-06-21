@@ -89,6 +89,8 @@ Enable via **HootCAD: Enable MCP Server** command when prompted. The extension p
 - **Source Code**: [github.com/owlprecision/hootcad](https://github.com/owlprecision/hootcad)
 - **Contributing**: See [CONTRIBUTING.md](https://github.com/owlprecision/hootcad/blob/main/CONTRIBUTING.md)
 
+Development and packaging require Node.js 22. HootCAD requires VS Code/Cursor API compatibility with VS Code 1.101 or newer.
+
 ## License
 
 MIT License - see [LICENSE](https://github.com/owlprecision/hootcad/blob/main/LICENSE) file for details
