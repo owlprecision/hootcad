@@ -11,6 +11,7 @@ Thank you for your interest in contributing to HootCAD! This guide will help you
    ```
 
 2. **Install dependencies**
+   Use Node.js 22 for development and packaging.
    ```bash
    npm install
    ```
@@ -32,6 +33,8 @@ Thank you for your interest in contributing to HootCAD! This guide will help you
 - **Run tests**: `npm test`
 - **Lint code**: `npm run lint`
 - **Package**: `npm run package:vsix`
+
+HootCAD requires VS Code/Cursor API compatibility with VS Code 1.101 or newer.
 
 ## Code Structure
 
