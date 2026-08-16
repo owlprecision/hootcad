@@ -1,0 +1,10 @@
+{
+  "id": "bushing-002",
+  "task": "generation",
+  "prompt": "A solid cylindrical bushing, 20mm diameter, 15mm tall.",
+  "requirements": {
+    "mustBeWatertight": true,
+    "boundingBox": { "x": 20, "y": 20, "z": 15, "tolerance": 0.3 },
+    "volume": { "min": 4500, "max": 4900 }
+  }
+}

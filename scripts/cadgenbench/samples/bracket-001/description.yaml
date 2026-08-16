@@ -1,0 +1,13 @@
+id: bracket-001
+task: generation
+prompt: "A solid rectangular mounting bracket, 50mm x 30mm x 10mm, with no holes."
+requirements:
+  mustBeWatertight: true
+  boundingBox:
+    x: 50
+    y: 30
+    z: 10
+    tolerance: 0.5
+  volume:
+    min: 14500
+    max: 15500

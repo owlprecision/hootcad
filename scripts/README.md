@@ -2,6 +2,17 @@
 
 This folder contains utility scripts for the HootCAD extension.
 
+## cadgenbench/
+
+A local, offline harness for scoring HootCAD/JSCAD solutions against
+benchmark-style tasks inspired by
+[CADGenBench](https://huggingface.co/spaces/HuggingAI4Engineering/CADGenBench).
+See [`cadgenbench/README.md`](cadgenbench/README.md) for details, or run:
+
+```bash
+npm run bench:cadgen
+```
+
 ## generate-roughness-map.js
 
 Generates a procedural roughness map texture for realistic CAD surface rendering.

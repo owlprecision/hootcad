@@ -83,6 +83,8 @@ HootCAD includes an optional **Model Context Protocol (MCP) server** for AI codi
 
 Enable via **HootCAD: Enable MCP Server** command when prompted. The extension provides setup instructions for your coding agent.
 
+**📊 Local benchmarking** - Score your agent's JSCAD solutions against benchmark-style tasks inspired by [CADGenBench](https://huggingface.co/spaces/HuggingAI4Engineering/CADGenBench) with `npm run bench:cadgen`. See [`scripts/cadgenbench/README.md`](scripts/cadgenbench/README.md) for details and limitations.
+
 ## Support & Contributing
 
 - **Report Issues**: [GitHub Issues](https://github.com/owlprecision/hootcad/issues)
