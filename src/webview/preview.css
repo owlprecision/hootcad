@@ -22,12 +22,30 @@ body {
 #header {
 	padding: 10px 20px;
 	border-bottom: 1px solid var(--vscode-panel-border);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
 }
 
 h1 {
 	margin: 0;
 	font-size: 16px;
 	color: var(--vscode-editor-foreground);
+}
+
+#snapshot-button {
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: none;
+	padding: 4px 12px;
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 12px;
+	font-family: var(--vscode-font-family);
+}
+
+#snapshot-button:hover {
+	background-color: var(--vscode-button-hoverBackground);
 }
 
 #canvas-container {

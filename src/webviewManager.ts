@@ -127,6 +127,27 @@ export class WebviewManager {
 				// Re-render with new parameters
 				await this.executeAndRender(message.filePath);
 				return;
+			case 'saveSnapshot': {
+				// The webview sends the framed preview canvas as a PNG data URL;
+				// the host owns the save dialog and the file write.
+				const match = typeof message.dataUrl === 'string'
+					? /^data:image\/png;base64,(.+)$/.exec(message.dataUrl)
+					: null;
+				if (!match) {
+					this.errorReporter.logInfo('Snapshot ignored: webview sent no PNG data');
+					return;
+				}
+				const target = await vscode.window.showSaveDialog({
+					defaultUri: vscode.Uri.file('hootcad-snapshot.png'),
+					filters: { 'PNG Image': ['png'] }
+				});
+				if (!target) {
+					return;
+				}
+				await vscode.workspace.fs.writeFile(target, Buffer.from(match[1], 'base64'));
+				this.errorReporter.logInfo(`Saved preview snapshot: ${target.fsPath}`);
+				return;
+			}
 		}
 	}
 

@@ -65,8 +65,16 @@ const webviewConfig = {
   resolve: {
     extensions: ['.js'],
     alias: {
-      // Ensure three.js is resolved from node_modules
-      'three': path.resolve(__dirname, 'node_modules/three/build/three.module.js')
+      // Ensure three.js is resolved from node_modules (exact match, so the
+      // addon prefixes below are not swallowed by it)
+      'three$': path.resolve(__dirname, 'node_modules/three/build/three.module.js'),
+      // Photonic imports addons through both prefixes; both resolve to the same
+      // single three install above, so the bundle carries one Three.js.
+      'three/addons': path.resolve(__dirname, 'node_modules/three/examples/jsm'),
+      'three/examples/jsm': path.resolve(__dirname, 'node_modules/three/examples/jsm'),
+      // The preview never loads splats; Photonic imports this package only lazily
+      // inside loadSplat, so it stays out of the bundle.
+      '@sparkjsdev/spark': false
     }
   },
   module: {

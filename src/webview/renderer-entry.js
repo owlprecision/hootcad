@@ -2,12 +2,9 @@
 
 // Static imports - webpack will bundle these
 import * as THREE from 'three';
+import { PhotonicScene } from '@codecube/photonic';
 import { convertGeom3ToBufferGeometry, convertGeom2ToLineGeometry } from './converter.js';
 import { updateParameterUI } from './parameterUI.js';
-import { CameraController } from './cameraController.js';
-import { InputController } from './inputController.js';
-import roughnessMapDataUrl from './roughness-map.png';
-import normalMapDataUrl from './normal-map.png';
 
 (function () {
 	function showBootError(error) {
@@ -26,16 +23,18 @@ import normalMapDataUrl from './normal-map.png';
 	(async () => {
 		const vscode = acquireVsCodeApi();
 
-		const canvas = document.getElementById('renderCanvas');
+		const container = document.getElementById('canvas-container');
+		const placeholderCanvas = document.getElementById('renderCanvas');
 		const statusElement = document.getElementById('status');
 		const loadingElement = document.getElementById('loading');
 		const errorElement = document.getElementById('error-message');
 		const parameterPanel = document.getElementById('parameter-panel');
 		const parameterContent = document.getElementById('parameter-content');
 		const collapseButton = document.getElementById('collapse-button');
+		const snapshotButton = document.getElementById('snapshot-button');
 
-		if (!canvas) {
-			throw new Error('Missing #renderCanvas');
+		if (!container) {
+			throw new Error('Missing #canvas-container');
 		}
 		if (!statusElement) {
 			throw new Error('Missing #status');
@@ -56,53 +55,22 @@ import normalMapDataUrl from './normal-map.png';
 			throw new Error('Missing #collapse-button');
 		}
 
-		// Brighter, JSCAD-like CAD preview lighting + color management.
-		// These are the knobs to tweak if you want to tune the overall look.
-		const LIGHTING_PRESET = {
-			ambientIntensity: 0.7,
-			hemiIntensity: 1.0,
-			keyIntensity: 1.7,
-			fillIntensity: 0.65,
-			rimIntensity: 0.4,
+		// The preview's settled look: the bright engineering setting HootCAD already
+		// has (light background, grid, multi-direction light), with Photonic's
+		// rendering quality on top (ACES grade, soft shadows, baked contact shading).
+		const LOOK = {
+			background: 0xf5f5f5,
 			exposure: 1.05,
-			toneMapping: THREE.ACESFilmicToneMapping
-		};
-
-		const SHADOW_PRESET = {
-			enabled: true,
-			// 0 = no visible shadow, 1 = full-strength shadow
-			intensity: 0.35,
-			// VSM produces much softer, less defined edges than PCF.
-			type: 'VSM',
-			mapSize: 2048,
-			// Used by PCF; ignored by VSM.
-			radius: 14,
-			// Used by VSM; ignored by PCF.
-			blurSamples: 32,
-			// Tune to avoid banding/striping on large flat receivers (floor) while
-			// keeping contact shadows reasonably tight.
-			bias: -0.00025,
-			normalBias: 0.02,
-			// Default extent; we tighten this dynamically per model for better shadow quality.
-			cameraExtent: 120,
-			cameraNear: 0.5,
-			cameraFar: 250
+			ambientIntensity: 0.75,
+			hemiIntensity: 0.9,
+			fillIntensity: 0.55,
+			rimIntensity: 0.35,
+			stageSize: 10
 		};
 
 		const MATERIAL_PRESET = {
-			// Lower metalness keeps saturated plastics from looking "sooty" without an environment map.
 			metalness: 0.15,
 			roughness: 0.65
-		};
-
-		// Very subtle, screen-space tilt-shift (fake shallow DoF).
-		// Blur increases toward the top/bottom of the screen.
-		const TILT_SHIFT_PRESET = {
-			enabled: true,
-			focusY: 0.52,
-			focusWidth: 0.22,
-			feather: 0.22,
-			blurStrengthPx: 2.2
 		};
 
 		function clamp01(value) {
@@ -127,268 +95,105 @@ import normalMapDataUrl from './normal-map.png';
 			return { colorHex, opacity };
 		}
 
-		// Three.js scene setup
-		let scene;
-		let camera;
-		let renderer;
-		let postScene;
-		let postCamera;
-		let postMaterial;
-		let postQuad;
-		let postTarget;
-		let gridHelper;
-		let meshGroup;
-		let floorMesh;
-		let floorMaterial;
-		let keyLight;
-		let roughnessMapTexture = null;
-		let normalMapTexture = null;
-		let animationFrameId = null;
-		let hasRenderedOnce = false; // Track if we've done initial render with auto-zoom
-		let userHasInteracted = false; // Track if user has moved camera
-		let isFloorGhosted = false;
+		let photonicScene = null;
+		let currentBounds = null;
+		let hasRenderedOnce = false;
+		let userHasInteracted = false;
 
-		const GRID_SIZE = 400;
-		const GRID_DIVISIONS = 40;
-
-		// Camera and input controllers
-		let cameraController;
-		let inputController;
-
-		function onWindowResize() {
-			const container = document.getElementById('canvas-container');
-			if (!container) {
-				return;
+		// Function names in this file are kept stable: the webview content tests
+		// check the bundled renderer for them (src/test/webviewContent.test.ts).
+		function initThreeJS() {
+			// Photonic owns the canvas; it takes over the placeholder's place and id.
+			if (placeholderCanvas) {
+				placeholderCanvas.remove();
 			}
-			const width = container.clientWidth;
-			const height = container.clientHeight;
+			photonicScene = new PhotonicScene(container, { exposure: LOOK.exposure });
+			photonicScene.renderer.renderer.domElement.id = 'renderCanvas';
 
-			// Update camera aspect ratio
-			camera.aspect = width / height;
-			camera.updateProjectionMatrix();
+			photonicScene.setBackgroundColor(LOOK.background);
+			photonicScene.setAmbientLight({ intensity: LOOK.ambientIntensity, color: 0xffffff });
+			photonicScene.setGridVisible(true);
+			photonicScene.setFloorVisible(true);
 
-			// Update renderer size - this updates the canvas drawing buffer
-			renderer.setSize(width, height);
+			// Hemisphere, fill, and rim lights keep the bright, even engineering
+			// illumination the old hand-rolled rig had; Photonic's own directional
+			// light stays the only shadow caster and is refit per model below.
+			const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9aa6b2, LOOK.hemiIntensity);
+			photonicScene.scene.add(hemiLight);
+			const fillLight = new THREE.DirectionalLight(0xffffff, LOOK.fillIntensity);
+			fillLight.position.set(20, 12, 10);
+			photonicScene.scene.add(fillLight);
+			const rimLight = new THREE.DirectionalLight(0xffffff, LOOK.rimIntensity);
+			rimLight.position.set(-10, 8, -20);
+			photonicScene.scene.add(rimLight);
 
-			// Ensure pixel ratio is maintained
-			renderer.setPixelRatio(window.devicePixelRatio);
-
-			updatePostProcessingSize();
-		}
-
-		function updatePostProcessingSize() {
-			if (!renderer || !postTarget || !postMaterial) {
-				return;
-			}
-			const size = new THREE.Vector2();
-			renderer.getDrawingBufferSize(size);
-			postTarget.setSize(size.x, size.y);
-			postMaterial.uniforms.resolution.value.set(size.x, size.y);
-		}
-
-		function initPostProcessing() {
-			if (!TILT_SHIFT_PRESET.enabled) {
-				return;
+			if (photonicScene.camera?.controls) {
+				photonicScene.camera.controls.addEventListener('start', () => {
+					userHasInteracted = true;
+				});
 			}
 
-			postTarget = new THREE.WebGLRenderTarget(1, 1, {
-				depthBuffer: true,
-				stencilBuffer: false
-			});
-
-			postScene = new THREE.Scene();
-			postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-			postMaterial = new THREE.ShaderMaterial({
-				uniforms: {
-					tDiffuse: { value: null },
-					resolution: { value: new THREE.Vector2(1, 1) },
-					focusY: { value: TILT_SHIFT_PRESET.focusY },
-					focusWidth: { value: TILT_SHIFT_PRESET.focusWidth },
-					feather: { value: TILT_SHIFT_PRESET.feather },
-					blurStrengthPx: { value: TILT_SHIFT_PRESET.blurStrengthPx }
-				},
-				vertexShader: `
-					varying vec2 vUv;
-					void main() {
-						vUv = uv;
-						gl_Position = vec4(position.xy, 0.0, 1.0);
-					}
-				`,
-				fragmentShader: `
-					precision highp float;
-					uniform sampler2D tDiffuse;
-					uniform vec2 resolution;
-					uniform float focusY;
-					uniform float focusWidth;
-					uniform float feather;
-					uniform float blurStrengthPx;
-					varying vec2 vUv;
-
-					float blurAmount(float y) {
-						float d = abs(y - focusY);
-						return smoothstep(focusWidth, focusWidth + feather, d);
-					}
-
-					void main() {
-						vec2 texel = 1.0 / resolution;
-						float amount = blurAmount(vUv.y);
-						float radius = amount * blurStrengthPx;
-
-						vec4 c = texture2D(tDiffuse, vUv) * 0.24;
-						c += texture2D(tDiffuse, vUv + vec2(texel.x * radius, 0.0)) * 0.14;
-						c += texture2D(tDiffuse, vUv - vec2(texel.x * radius, 0.0)) * 0.14;
-						c += texture2D(tDiffuse, vUv + vec2(0.0, texel.y * radius)) * 0.14;
-						c += texture2D(tDiffuse, vUv - vec2(0.0, texel.y * radius)) * 0.14;
-						c += texture2D(tDiffuse, vUv + vec2(texel.x * radius, texel.y * radius)) * 0.05;
-						c += texture2D(tDiffuse, vUv + vec2(-texel.x * radius, texel.y * radius)) * 0.05;
-						c += texture2D(tDiffuse, vUv + vec2(texel.x * radius, -texel.y * radius)) * 0.05;
-						c += texture2D(tDiffuse, vUv + vec2(-texel.x * radius, -texel.y * radius)) * 0.05;
-
-						gl_FragColor = c;
-					}
-				`
-			});
-			postMaterial.toneMapped = false;
-
-			postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMaterial);
-			postScene.add(postQuad);
-
-			updatePostProcessingSize();
-		}
-
-		function animate() {
-			animationFrameId = requestAnimationFrame(animate);
-
-			if (floorMesh && floorMesh.visible && floorMaterial) {
-				const shouldGhost = camera.position.z < floorMesh.position.z;
-				if (shouldGhost !== isFloorGhosted) {
-					isFloorGhosted = shouldGhost;
-					if (isFloorGhosted) {
-						floorMaterial.transparent = true;
-						floorMaterial.opacity = 0.35;
-						floorMaterial.depthWrite = false;
-					} else {
-						floorMaterial.transparent = false;
-						floorMaterial.opacity = 1;
-						floorMaterial.depthWrite = true;
-					}
-					floorMaterial.needsUpdate = true;
-				}
+			if (typeof ResizeObserver !== 'undefined') {
+				const resizeObserver = new ResizeObserver(() => {
+					photonicScene.handleResize();
+				});
+				resizeObserver.observe(container);
 			}
 
-			if (TILT_SHIFT_PRESET.enabled && postTarget && postMaterial && postScene && postCamera) {
-				postMaterial.uniforms.tDiffuse.value = postTarget.texture;
-				renderer.setRenderTarget(postTarget);
-				renderer.render(scene, camera);
-				renderer.setRenderTarget(null);
-				renderer.render(postScene, postCamera);
-			} else {
-				renderer.render(scene, camera);
-			}
-		}
+			// Test hook: lets the packaged-build harness verify the live scene.
+			window.__hootcadPhotonic = photonicScene;
 
-		function clearScene() {
-			while (meshGroup.children.length > 0) {
-				const child = meshGroup.children[0];
-				meshGroup.remove(child);
-				if (child.geometry) {
-					child.geometry.dispose();
-				}
-				if (child.material) {
-					child.material.dispose();
-				}
-			}
-		}
-
-		function getMeshGroupBounds() {
-			const box = new THREE.Box3();
-
-			if (meshGroup.children.length === 0) {
-				return null;
-			}
-
-			// Ensure world matrices are up-to-date before computing bounds
-			meshGroup.updateMatrixWorld(true);
-
-			meshGroup.children.forEach((child) => {
-				const childBox = new THREE.Box3().setFromObject(child);
-				box.union(childBox);
-			});
-
-			const center = new THREE.Vector3();
-			const size = new THREE.Vector3();
-			box.getCenter(center);
-			box.getSize(size);
-
-			return { box, center, size };
-		}
-
-		function updateFloorFromBounds(bounds) {
-			if (!floorMesh) {
-				return;
-			}
-			if (!bounds) {
-				floorMesh.visible = false;
-				if (gridHelper) {
-					gridHelper.position.z = 0;
-				}
-				return;
-			}
-
-			const { box, size } = bounds;
-			const floorOffset = 0.01;
-			const gridOffsetAboveFloor = 0.01;
-			const maxDim = Math.max(size.x, size.y, size.z);
-			const minPlaneSize = GRID_SIZE;
-			const desiredPlaneSize = Math.max(minPlaneSize, maxDim * 2);
-
-			floorMesh.visible = true;
-			floorMesh.position.z = box.min.z - floorOffset;
-			if (gridHelper) {
-				gridHelper.position.z = floorMesh.position.z + gridOffsetAboveFloor;
-				const gridScale = desiredPlaneSize / GRID_SIZE;
-				gridHelper.scale.set(gridScale, 1, gridScale);
-			}
-			// Floor is an XY plane in Z-up world, so scale X and Y.
-			floorMesh.scale.set(desiredPlaneSize, desiredPlaneSize, 1);
-			isFloorGhosted = false;
-			if (floorMaterial) {
-				floorMaterial.transparent = false;
-				floorMaterial.opacity = 1;
-				floorMaterial.depthWrite = true;
-			}
+			statusElement.textContent = 'Status: Ready';
+			loadingElement.style.display = 'none';
 		}
 
 		function fitCameraToObjects() {
-			const bounds = getMeshGroupBounds();
-			if (!bounds) {
+			if (!photonicScene || !currentBounds) {
 				return;
 			}
-			
-			// Use camera controller to fit to view
-			cameraController.fitToView(bounds);
+			const { center, size } = currentBounds;
+			const maxDim = Math.max(size.x, size.y, size.z);
 
-			// Keep the key light aimed at the model center and tighten the shadow frustum
-			// so shadows are higher-res and less blocky.
+			photonicScene.setCameraTarget(center.x, center.y, center.z);
+			// Frame the bounding sphere inside the vertical field of view, so a
+			// wide, flat model fills the view the way the old fit did.
+			const radius = size.length() / 2;
+			const halfFov = THREE.MathUtils.degToRad(photonicScene.camera.camera.fov) / 2;
+			const distance = Math.max(maxDim * 0.9, (radius / Math.sin(halfFov)) * 1.02);
+			const direction = new THREE.Vector3(0.62, 0.5, 0.62).normalize();
+			photonicScene.setCameraPosition(
+				center.x + direction.x * distance,
+				center.y + direction.y * distance,
+				center.z + direction.z * distance
+			);
+			if (photonicScene.camera?.controls) {
+				photonicScene.camera.controls.maxDistance = Math.max(50, distance * 4);
+			}
+
+			// Refit Photonic's shadow-casting key light to the model, the same
+			// tightening the old renderer did on every fit.
+			const keyLight = photonicScene.defaultDirectionalLight;
 			if (keyLight) {
-				keyLight.target.position.set(bounds.center.x, bounds.center.y, bounds.center.z);
+				keyLight.position.set(-maxDim * 1.6, maxDim * 2.4, maxDim * 1.3);
+				keyLight.target.position.set(center.x, center.y, center.z);
 				keyLight.target.updateMatrixWorld(true);
-
-				if (SHADOW_PRESET.enabled && keyLight.castShadow) {
-					const maxDim = Math.max(bounds.size.x, bounds.size.y, bounds.size.z);
-					const extent = Math.max(15, Math.min(220, maxDim * 2.5));
-					keyLight.shadow.camera.left = -extent;
-					keyLight.shadow.camera.right = extent;
-					keyLight.shadow.camera.top = extent;
-					keyLight.shadow.camera.bottom = -extent;
-					keyLight.shadow.camera.updateProjectionMatrix();
-				}
+				const extent = Math.max(4, maxDim * 0.85);
+				keyLight.shadow.camera.left = -extent;
+				keyLight.shadow.camera.right = extent;
+				keyLight.shadow.camera.top = extent;
+				keyLight.shadow.camera.bottom = -extent;
+				keyLight.shadow.camera.near = 1;
+				keyLight.shadow.camera.far = maxDim * 8 + 40;
+				keyLight.shadow.camera.updateProjectionMatrix();
 			}
 		}
 
 		function renderGeometries(geometries) {
-			clearScene();
+			// JSCAD is Z-up and Photonic is Y-up: every mesh goes into one group
+			// turned -90 degrees about X, adopted whole through Photonic's public
+			// addMesh call so the bake, clearing, and handles all see the model.
+			const group = new THREE.Group();
+			group.rotation.x = -Math.PI / 2;
 
 			for (const geom of geometries) {
 				try {
@@ -398,22 +203,15 @@ import normalMapDataUrl from './normal-map.png';
 						const materialOptions = {
 							color: colorHex,
 							metalness: MATERIAL_PRESET.metalness,
-						roughness: MATERIAL_PRESET.roughness,
-						roughnessMap: roughnessMapTexture,
-						normalMap: normalMapTexture,
-						normalScale: new THREE.Vector2(0.12, 0.12),
-						side: THREE.DoubleSide
+							roughness: MATERIAL_PRESET.roughness,
+							side: THREE.DoubleSide
 						};
 						if (opacity < 1) {
 							materialOptions.transparent = true;
 							materialOptions.opacity = opacity;
 							materialOptions.depthWrite = false;
 						}
-						const material = new THREE.MeshStandardMaterial(materialOptions);
-						const mesh = new THREE.Mesh(geometry, material);
-						mesh.castShadow = SHADOW_PRESET.enabled;
-						// Transparent meshes look terrible when they receive shadow maps (self-shadow acne).
-						mesh.receiveShadow = SHADOW_PRESET.enabled && opacity >= 1;
+						const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial(materialOptions));
 
 						if (geom.transforms && Array.isArray(geom.transforms) && geom.transforms.length === 16) {
 							const matrix = new THREE.Matrix4();
@@ -421,7 +219,7 @@ import normalMapDataUrl from './normal-map.png';
 							matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
 						}
 
-						meshGroup.add(mesh);
+						group.add(mesh);
 					} else if (geom.type === 'geom2') {
 						const geometry = convertGeom2ToLineGeometry(geom, THREE);
 						const { colorHex, opacity } = getColorHexAndOpacity(geom, 0x2266cc);
@@ -430,10 +228,7 @@ import normalMapDataUrl from './normal-map.png';
 							lineOptions.transparent = true;
 							lineOptions.opacity = opacity;
 						}
-						const material = new THREE.LineBasicMaterial(lineOptions);
-						const line = new THREE.LineSegments(geometry, material);
-						line.castShadow = false;
-						line.receiveShadow = false;
+						const line = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial(lineOptions));
 
 						if (geom.transforms && Array.isArray(geom.transforms) && geom.transforms.length === 16) {
 							const matrix = new THREE.Matrix4();
@@ -441,21 +236,62 @@ import normalMapDataUrl from './normal-map.png';
 							matrix.decompose(line.position, line.quaternion, line.scale);
 						}
 
-						meshGroup.add(line);
+						group.add(line);
 					}
 				} catch (error) {
 					console.error('Error converting geometry:', error);
 				}
 			}
 
-			statusElement.textContent = 'Status: Rendered ' + geometries.length + ' object(s)';
+			photonicScene.clearObjects();
 
-			updateFloorFromBounds(getMeshGroupBounds());
+			if (group.children.length === 0) {
+				currentBounds = null;
+				statusElement.textContent = 'Status: Rendered ' + geometries.length + ' object(s)';
+				return;
+			}
+
+			// Presentation copy only: center the model on the stage, rest it on
+			// the floor, and scale it to a fixed size across so Photonic's grid,
+			// light, and shadow tuning (room scale) apply as designed. The model's
+			// own coordinates, parameters, and exports are untouched.
+			group.updateMatrixWorld(true);
+			const rawBox = new THREE.Box3().setFromObject(group);
+			const rawSize = rawBox.getSize(new THREE.Vector3());
+			const rawCenter = rawBox.getCenter(new THREE.Vector3());
+			const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z) || 1;
+			const scale = LOOK.stageSize / maxDim;
+			group.scale.setScalar(scale);
+			group.position.set(-rawCenter.x * scale, -rawBox.min.y * scale, -rawCenter.z * scale);
+
+			photonicScene.addMesh(group);
+
+			const size = rawSize.clone().multiplyScalar(scale);
+			currentBounds = { center: new THREE.Vector3(0, size.y / 2, 0), size };
+
+			// Baked contact shading over the adopted geometry (Photonic F11).
+			try {
+				photonicScene.bakeAmbientOcclusion();
+			} catch (error) {
+				console.error('Baked ambient occlusion failed:', error);
+			}
+
+			statusElement.textContent = 'Status: Rendered ' + geometries.length + ' object(s)';
 
 			if (!hasRenderedOnce && !userHasInteracted) {
 				fitCameraToObjects();
 				hasRenderedOnce = true;
 			}
+		}
+
+		function captureSnapshot() {
+			if (!photonicScene) {
+				return;
+			}
+			const renderer = photonicScene.renderer.renderer;
+			renderer.render(photonicScene.scene, photonicScene.camera.camera);
+			const dataUrl = renderer.domElement.toDataURL('image/png');
+			vscode.postMessage({ type: 'saveSnapshot', dataUrl });
 		}
 
 		function showError(message) {
@@ -468,159 +304,13 @@ import normalMapDataUrl from './normal-map.png';
 			errorElement.style.display = 'none';
 		}
 
-		function initThreeJS() {
-			scene = new THREE.Scene();
-			scene.background = new THREE.Color(0xf5f5f5);
-
-			const aspect = canvas.clientWidth / canvas.clientHeight;
-			camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-			camera.up.set(0, 0, 1);
-			camera.position.set(30, 30, 30);
-			camera.lookAt(0, 0, 0);
-
-
-			renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-			renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-			renderer.setPixelRatio(window.devicePixelRatio);
-			if ('useLegacyLights' in renderer) {
-				renderer.useLegacyLights = false;
-			}
-
-			if (THREE.ColorManagement) {
-				THREE.ColorManagement.enabled = true;
-			}
-			renderer.outputColorSpace = THREE.SRGBColorSpace;
-			renderer.toneMapping = LIGHTING_PRESET.toneMapping;
-			renderer.toneMappingExposure = LIGHTING_PRESET.exposure;
-
-			renderer.shadowMap.enabled = SHADOW_PRESET.enabled;
-			renderer.shadowMap.type =
-				SHADOW_PRESET.type === 'VSM' ? THREE.VSMShadowMap : THREE.PCFSoftShadowMap;
-
-			initPostProcessing();
-
-			const ambientLight = new THREE.AmbientLight(0xffffff, LIGHTING_PRESET.ambientIntensity);
-			scene.add(ambientLight);
-
-			const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9aa6b2, LIGHTING_PRESET.hemiIntensity);
-			hemiLight.position.set(0, 0, 1);
-			scene.add(hemiLight);
-
-			// Key light: from upper-left-front to differentiate top/side surfaces
-			keyLight = new THREE.DirectionalLight(0xffffff, LIGHTING_PRESET.keyIntensity);
-			keyLight.position.set(-45, 35, 55);
-			keyLight.castShadow = SHADOW_PRESET.enabled;
-			if (SHADOW_PRESET.enabled) {
-				// Available in newer Three.js (r150+). Keep guarded for compatibility.
-				if (keyLight.shadow && 'intensity' in keyLight.shadow) {
-					keyLight.shadow.intensity = SHADOW_PRESET.intensity;
-				}
-				keyLight.shadow.mapSize.width = SHADOW_PRESET.mapSize;
-				keyLight.shadow.mapSize.height = SHADOW_PRESET.mapSize;
-				if (SHADOW_PRESET.type !== 'VSM') {
-					keyLight.shadow.radius = SHADOW_PRESET.radius;
-				} else {
-					// VSM uses an internal blur pass; more samples = softer edge.
-					keyLight.shadow.blurSamples = SHADOW_PRESET.blurSamples;
-				}
-				keyLight.shadow.bias = SHADOW_PRESET.bias;
-				keyLight.shadow.normalBias = SHADOW_PRESET.normalBias;
-				keyLight.shadow.camera.near = SHADOW_PRESET.cameraNear;
-				keyLight.shadow.camera.far = SHADOW_PRESET.cameraFar;
-				keyLight.shadow.camera.left = -SHADOW_PRESET.cameraExtent;
-				keyLight.shadow.camera.right = SHADOW_PRESET.cameraExtent;
-				keyLight.shadow.camera.top = SHADOW_PRESET.cameraExtent;
-				keyLight.shadow.camera.bottom = -SHADOW_PRESET.cameraExtent;
-			}
-			scene.add(keyLight);
-			// DirectionalLight shadows aim at its target.
-			scene.add(keyLight.target);
-
-			// Fill light: from lower-right to illuminate right-facing surfaces differently
-			const fillLight = new THREE.DirectionalLight(0xffffff, LIGHTING_PRESET.fillIntensity);
-			fillLight.position.set(55, 25, 25);
-			scene.add(fillLight);
-
-			// Rim light: edge definition from back
-			const rimLight = new THREE.DirectionalLight(0xffffff, LIGHTING_PRESET.rimIntensity);
-			rimLight.position.set(-25, -45, 25);
-			scene.add(rimLight);
-
-			gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x8899aa, 0xc5d0dd);
-			// GridHelper is XZ by default (Y-up). Rotate into XY for Z-up.
-			gridHelper.rotateX(Math.PI / 2);
-			scene.add(gridHelper);
-
-			const axesHelper = new THREE.AxesHelper(100);
-			scene.add(axesHelper);
-
-			meshGroup = new THREE.Group();
-			scene.add(meshGroup);
-
-			// Floor plane (positioned dynamically per-model).
-			// Use a unit plane and scale it per render to avoid re-allocating geometry.
-			const floorGeometry = new THREE.PlaneGeometry(1, 1);
-			floorMaterial = new THREE.MeshStandardMaterial({
-				color: 0xf7f7f7,
-				metalness: 0,
-				roughness: 0.95,
-				side: THREE.DoubleSide
-			});
-			floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
-			floorMesh.castShadow = false;
-			floorMesh.receiveShadow = SHADOW_PRESET.enabled;
-			floorMesh.visible = false;
-			scene.add(floorMesh);
-		// Load surface texture maps
-		const textureLoader = new THREE.TextureLoader();
-		
-		roughnessMapTexture = textureLoader.load(roughnessMapDataUrl);
-		roughnessMapTexture.wrapS = THREE.RepeatWrapping;
-		roughnessMapTexture.wrapT = THREE.RepeatWrapping;
-		roughnessMapTexture.repeat.set(4, 4); // Tile the texture for finer detail
-		
-		normalMapTexture = textureLoader.load(normalMapDataUrl);
-		normalMapTexture.wrapS = THREE.RepeatWrapping;
-		normalMapTexture.wrapT = THREE.RepeatWrapping;
-		normalMapTexture.repeat.set(4, 4); // Match roughness map tiling
-			// Initialize camera and input controllers
-			cameraController = new CameraController(camera, {
-				target: { x: 0, y: 0, z: 0 },
-				rotation: { theta: Math.PI / 4, phi: Math.PI / 4 },
-				distance: 50,
-				minDistance: 5,
-				maxDistance: 200
-			});
-			
-			// Update camera position based on controller settings
-			cameraController.updatePosition();
-			
-			// Initialize input controller
-			inputController = new InputController(canvas, cameraController, {
-				onInteraction: () => {
-					userHasInteracted = true;
-				}
-			});
-
-			const container = document.getElementById('canvas-container');
-			if (container && typeof ResizeObserver !== 'undefined') {
-				const resizeObserver = new ResizeObserver(() => {
-					onWindowResize();
-				});
-				resizeObserver.observe(container);
-			}
-
-			animate();
-
-			statusElement.textContent = 'Status: Ready';
-			loadingElement.style.display = 'none';
-		}
-
 		// Parameter panel collapse
 		document.getElementById('parameter-header')?.addEventListener('click', () => {
 			parameterContent.classList.toggle('collapsed');
 			collapseButton.textContent = parameterContent.classList.contains('collapsed') ? '▶' : '▼';
 		});
+
+		snapshotButton?.addEventListener('click', captureSnapshot);
 
 		// Message handling
 		window.addEventListener('message', (event) => {
