@@ -213,7 +213,7 @@ import { updateParameterUI } from './parameterUI.js';
 			return null;
 		}
 
-		async function loadReferenceModel(name, data) {
+		async function loadReferenceModel(name, data, hand = {}) {
 			if (!photonicScene) {
 				return;
 			}
@@ -224,26 +224,42 @@ import { updateParameterUI } from './parameterUI.js';
 			}
 			clearReferenceModel();
 			try {
-				// Photonic F13: the parsed model is adopted like any scene
-				// object. disposeOnRemove stays off so a design re-render —
-				// which clears every registered object — can re-adopt the same
-				// model instead of disposing it (see renderGeometries).
-				const handle = await photonicScene.loadModel({
+				// Photonic F13/F14: the parsed model is adopted like any scene
+				// object. The host names the format from the picked file's
+				// extension, and an OBJ's material file rides along as mtlData
+				// when the host found one beside the OBJ. disposeOnRemove stays
+				// off so a design re-render — which clears every registered
+				// object — can re-adopt the same model instead of disposing it
+				// (see renderGeometries).
+				const loadOptions = {
 					data: buffer,
 					name: 'Reference: ' + name,
 					disposeOnRemove: false
-				});
+				};
+				if (hand.format) {
+					loadOptions.format = hand.format;
+				}
+				const mtlBuffer = hand.mtlData ? toModelArrayBuffer(hand.mtlData) : null;
+				if (mtlBuffer) {
+					loadOptions.mtlData = mtlBuffer;
+				}
+				const handle = await photonicScene.loadModel(loadOptions);
 				referenceHandle = handle;
 				referenceName = name;
 				referenceInfo = typeof handle.getModelInfo === 'function' ? handle.getModelInfo() : null;
 				placeReferenceModel();
 				hideError();
-				statusElement.textContent = 'Status: Reference model loaded: ' + name;
+				const materialNote = hand.mtlName
+					? ' (materials: ' + hand.mtlName + ')'
+					: (hand.missingMaterial ? ' (without materials - ' + hand.missingMaterial + ' not found)' : '');
+				statusElement.textContent = 'Status: Reference model loaded: ' + name + materialNote;
 				vscode.postMessage({
 					type: 'referenceModelLoaded',
 					name,
 					format: referenceInfo ? referenceInfo.format : 'unknown',
-					meshCount: referenceInfo ? referenceInfo.meshCount : 0
+					meshCount: referenceInfo ? referenceInfo.meshCount : 0,
+					materialFile: hand.mtlName || null,
+					materialsMissing: mtlBuffer ? null : (hand.missingMaterial || null)
 				});
 			} catch (error) {
 				console.error('Failed to load reference model:', error);
@@ -451,7 +467,7 @@ import { updateParameterUI } from './parameterUI.js';
 					}
 					break;
 				case 'loadReferenceModel':
-					void loadReferenceModel(message.name, message.data);
+					void loadReferenceModel(message.name, message.data, message);
 					break;
 				case 'clearReferenceModel':
 					clearReferenceModel();

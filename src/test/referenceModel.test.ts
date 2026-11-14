@@ -1,11 +1,17 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { WebviewManager } from '../webviewManager';
 import { WebviewContentProvider } from '../webviewContentProvider';
 import { ErrorReporter } from '../errorReporter';
 import { ParameterCache } from '../parameterCache';
+import {
+	referenceModelFormatForFile,
+	parseMtlLibNames,
+	findObjMaterialCompanion
+} from '../referenceModelCommand';
 
 suite('Reference Model Test Suite', () => {
 	let extensionPath: string;
@@ -69,6 +75,116 @@ suite('Reference Model Test Suite', () => {
 		manager.clearReferenceModel();
 	});
 
+	test('WebviewManager should accept an OBJ format hand-off with no panel open', () => {
+		const manager = createWebviewManager();
+		// The widened hand-off — explicit format, material bytes, or a
+		// declared-but-missing material name — is a no-op without a panel
+		// and must not throw, like the plain glTF hand-off.
+		manager.sendReferenceModel('knob.obj', new TextEncoder().encode('mtllib knob.mtl\n'), {
+			format: 'obj',
+			mtlData: new TextEncoder().encode('newmtl body\n'),
+			mtlName: 'knob.mtl'
+		});
+		manager.sendReferenceModel('knob.obj', new TextEncoder().encode('mtllib lost.mtl\n'), {
+			format: 'obj',
+			missingMaterial: 'lost.mtl'
+		});
+		manager.sendReferenceModel('bracket.stl', new Uint8Array([0x73, 0x6f, 0x6c]), { format: 'stl' });
+	});
+
+	test('Format should be named from the picked file extension', () => {
+		assert.strictEqual(referenceModelFormatForFile('part.glb'), 'glb');
+		assert.strictEqual(referenceModelFormatForFile('part.gltf'), 'gltf');
+		assert.strictEqual(referenceModelFormatForFile('bracket.stl'), 'stl');
+		assert.strictEqual(referenceModelFormatForFile('knob.obj'), 'obj');
+		assert.strictEqual(referenceModelFormatForFile('KNOB.OBJ'), 'obj');
+		assert.strictEqual(referenceModelFormatForFile('/some/folder/Wedge.Stl'), 'stl');
+		assert.strictEqual(referenceModelFormatForFile('notes.txt'), undefined);
+	});
+
+	test('Compiled command should offer STL and OBJ in the picker', () => {
+		const commandPath = path.join(extensionPath, 'out', 'referenceModelCommand.js');
+		const commandCode = fs.readFileSync(commandPath, 'utf8');
+
+		assert.ok(commandCode.includes("'glb'"), 'Picker should offer glb');
+		assert.ok(commandCode.includes("'gltf'"), 'Picker should offer gltf');
+		assert.ok(commandCode.includes("'stl'"), 'Picker should offer stl');
+		assert.ok(commandCode.includes("'obj'"), 'Picker should offer obj');
+	});
+
+	test('mtllib names should be parsed from OBJ text', () => {
+		assert.deepStrictEqual(parseMtlLibNames('mtllib knob.mtl\no Knob\n'), ['knob.mtl']);
+		assert.deepStrictEqual(
+			parseMtlLibNames('mtllib body.mtl top.mtl\nmtllib extra.mtl\n'),
+			['body.mtl', 'top.mtl', 'extra.mtl']
+		);
+		assert.deepStrictEqual(parseMtlLibNames('  mtllib spaced.mtl  \n'), ['spaced.mtl']);
+		assert.deepStrictEqual(parseMtlLibNames('o Plain\nv 0 0 0\n'), []);
+	});
+
+	test('OBJ material companion should be found beside the OBJ', async () => {
+		await withTempDir(async dir => {
+			const objPath = path.join(dir, 'knob.obj');
+			fs.writeFileSync(objPath, 'mtllib knob.mtl\no Knob\n');
+			fs.writeFileSync(path.join(dir, 'knob.mtl'), 'newmtl body\n');
+
+			const lookup = await findObjMaterialCompanion(
+				vscode.Uri.file(objPath),
+				fs.readFileSync(objPath)
+			);
+			assert.deepStrictEqual(lookup.declared, ['knob.mtl']);
+			assert.ok(lookup.companion, 'The declared material file should be found');
+			assert.strictEqual(lookup.companion.name, 'knob.mtl');
+			assert.strictEqual(new TextDecoder().decode(lookup.companion.data), 'newmtl body\n');
+		});
+	});
+
+	test('OBJ material companion should resolve an mtllib name in a subfolder', async () => {
+		await withTempDir(async dir => {
+			const objPath = path.join(dir, 'knob.obj');
+			fs.writeFileSync(objPath, 'mtllib materials/knob.mtl\no Knob\n');
+			fs.mkdirSync(path.join(dir, 'materials'));
+			fs.writeFileSync(path.join(dir, 'materials', 'knob.mtl'), 'newmtl body\n');
+
+			const lookup = await findObjMaterialCompanion(
+				vscode.Uri.file(objPath),
+				fs.readFileSync(objPath)
+			);
+			assert.ok(lookup.companion, 'The subfolder material file should be found');
+			assert.strictEqual(lookup.companion.name, 'knob.mtl');
+		});
+	});
+
+	test('OBJ material companion should fall back to the same-named .mtl', async () => {
+		await withTempDir(async dir => {
+			const objPath = path.join(dir, 'knob.obj');
+			fs.writeFileSync(objPath, 'mtllib lost.mtl\no Knob\n');
+			fs.writeFileSync(path.join(dir, 'knob.mtl'), 'newmtl body\n');
+
+			const lookup = await findObjMaterialCompanion(
+				vscode.Uri.file(objPath),
+				fs.readFileSync(objPath)
+			);
+			assert.deepStrictEqual(lookup.declared, ['lost.mtl']);
+			assert.ok(lookup.companion, 'The same-named .mtl should be found');
+			assert.strictEqual(lookup.companion.name, 'knob.mtl');
+		});
+	});
+
+	test('OBJ material companion should report declared names when nothing is found', async () => {
+		await withTempDir(async dir => {
+			const objPath = path.join(dir, 'knob.obj');
+			fs.writeFileSync(objPath, 'mtllib lost.mtl\no Knob\n');
+
+			const lookup = await findObjMaterialCompanion(
+				vscode.Uri.file(objPath),
+				fs.readFileSync(objPath)
+			);
+			assert.deepStrictEqual(lookup.declared, ['lost.mtl']);
+			assert.strictEqual(lookup.companion, undefined, 'No companion should be invented');
+		});
+	});
+
 	test('Bundled renderer should wire the reference model messages', () => {
 		const rendererPath = path.join(extensionPath, 'dist', 'webview', 'renderer.js');
 		const rendererCode = fs.readFileSync(rendererPath, 'utf8');
@@ -82,6 +198,10 @@ suite('Reference Model Test Suite', () => {
 		assert.ok(rendererCode.includes('referenceModelError'), 'Renderer should report referenceModelError to the host');
 		assert.ok(rendererCode.includes('loadModel'), 'Renderer should call Photonic loadModel');
 		assert.ok(rendererCode.includes('getModelInfo'), 'Renderer should read the loaded model info');
+		assert.ok(rendererCode.includes('loadOptions.format'), 'Renderer should hand the named format to the loader');
+		assert.ok(rendererCode.includes('loadOptions.mtlData'), 'Renderer should supply an OBJ material file as mtlData');
+		assert.ok(rendererCode.includes('materialFile'), 'Renderer should report the material file that travelled');
+		assert.ok(rendererCode.includes('materialsMissing'), 'Renderer should report a declared material file that was not found');
 	});
 
 	test('Preview HTML should include the Clear Reference button', () => {
@@ -98,6 +218,18 @@ suite('Reference Model Test Suite', () => {
 		assert.ok(html.includes('id="clear-reference-button"'), 'Should have the Clear Reference button');
 	});
 });
+
+/**
+ * Run a test body inside a fresh temporary folder, removed afterwards
+ */
+async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hootcad-refmodel-'));
+	try {
+		await run(dir);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
 
 /**
  * Build a WebviewManager against minimal mocks (no panel is ever created)

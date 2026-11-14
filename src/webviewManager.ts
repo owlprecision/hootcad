@@ -6,13 +6,27 @@ import { resolveJscadEntrypoint, executeJscadFile, getParameterDefinitions } fro
 import { extractFilename, formatPreviewTitle } from './utilities';
 
 /**
+ * The format hand-off that travels with a reference model's bytes: the
+ * load format named from the picked file's extension, an OBJ material
+ * file's bytes and name when the extension host found one beside the OBJ,
+ * and the name of a declared material file that was not found — in that
+ * case the model still loads, without materials, and the preview says so.
+ */
+export interface ReferenceModelOptions {
+	format?: string;
+	mtlData?: Uint8Array;
+	mtlName?: string;
+	missingMaterial?: string;
+}
+
+/**
  * Manages webview panel lifecycle, messaging, and rendering
  */
 export class WebviewManager {
 	private currentPanel: vscode.WebviewPanel | undefined;
 	private currentEntrypoint: string | undefined;
 	private webviewReady = false;
-	private pendingReferenceModel: { name: string; data: Uint8Array } | undefined;
+	private pendingReferenceModel: ({ name: string; data: Uint8Array } & ReferenceModelOptions) | undefined;
 	private context: vscode.ExtensionContext;
 	private errorReporter: ErrorReporter;
 	private contentProvider: WebviewContentProvider;
@@ -130,22 +144,26 @@ export class WebviewManager {
 				if (this.pendingReferenceModel && this.currentPanel) {
 					const pending = this.pendingReferenceModel;
 					this.pendingReferenceModel = undefined;
-					void this.currentPanel.webview.postMessage({
-						type: 'loadReferenceModel',
-						name: pending.name,
-						data: pending.data
-					});
+					void this.currentPanel.webview.postMessage(this.referenceModelMessage(pending));
 				}
 				return;
-			case 'referenceModelLoaded':
+			case 'referenceModelLoaded': {
+				const notes: string[] = [];
+				if (message.materialFile) {
+					notes.push(`materials from ${message.materialFile}`);
+				}
+				if (message.materialsMissing) {
+					notes.push(`material file ${message.materialsMissing} not found - loaded without materials`);
+				}
 				this.errorReporter.logInfo(
-					`Reference model in preview: ${message.name} (${message.format}, ${message.meshCount} meshes)`
+					`Reference model in preview: ${message.name} (${message.format}, ${message.meshCount} meshes${notes.length > 0 ? '; ' + notes.join('; ') : ''})`
 				);
 				this.statusBarItem.text = `HootCAD: Reference ${message.name}`;
 				setTimeout(() => {
 					this.statusBarItem.text = "HootCAD: Ready";
 				}, 3000);
 				return;
+			}
 			case 'referenceModelError':
 				this.errorReporter.logInfo(`Reference model error: ${message.message}`);
 				vscode.window.showErrorMessage(message.message);
@@ -252,18 +270,35 @@ export class WebviewManager {
 	}
 
 	/**
+	 * The webview message that carries a reference model load: the file's
+	 * bytes plus the format hand-off (see ReferenceModelOptions).
+	 */
+	private referenceModelMessage(load: { name: string; data: Uint8Array } & ReferenceModelOptions) {
+		return {
+			type: 'loadReferenceModel',
+			name: load.name,
+			data: load.data,
+			format: load.format,
+			mtlData: load.mtlData,
+			mtlName: load.mtlName,
+			missingMaterial: load.missingMaterial
+		};
+	}
+
+	/**
 	 * Send a reference model file's bytes to the preview webview. When the
 	 * panel was just created and its webview has not signalled ready yet, the
 	 * model is queued and delivered by the ready handler instead.
 	 */
-	sendReferenceModel(name: string, data: Uint8Array): void {
+	sendReferenceModel(name: string, data: Uint8Array, options: ReferenceModelOptions = {}): void {
 		if (!this.currentPanel) {
 			return;
 		}
+		const load = { name, data, ...options };
 		if (this.webviewReady) {
-			void this.currentPanel.webview.postMessage({ type: 'loadReferenceModel', name, data });
+			void this.currentPanel.webview.postMessage(this.referenceModelMessage(load));
 		} else {
-			this.pendingReferenceModel = { name, data };
+			this.pendingReferenceModel = load;
 		}
 	}
 
