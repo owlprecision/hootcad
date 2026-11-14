@@ -32,6 +32,7 @@ import { updateParameterUI } from './parameterUI.js';
 		const parameterContent = document.getElementById('parameter-content');
 		const collapseButton = document.getElementById('collapse-button');
 		const snapshotButton = document.getElementById('snapshot-button');
+		const clearReferenceButton = document.getElementById('clear-reference-button');
 
 		if (!container) {
 			throw new Error('Missing #canvas-container');
@@ -97,8 +98,16 @@ import { updateParameterUI } from './parameterUI.js';
 
 		let photonicScene = null;
 		let currentBounds = null;
+		let currentDesignScale = null;
 		let hasRenderedOnce = false;
 		let userHasInteracted = false;
+
+		// Reference geometry: a model file loaded for fit checks alongside the
+		// designed part. It lives in the Photonic scene only — never in the
+		// JSCAD model, its parameters, or its exports.
+		let referenceHandle = null;
+		let referenceInfo = null;
+		let referenceName = null;
 
 		// Function names in this file are kept stable: the webview content tests
 		// check the bundled renderer for them (src/test/webviewContent.test.ts).
@@ -188,6 +197,96 @@ import { updateParameterUI } from './parameterUI.js';
 			}
 		}
 
+		// The host sends the picked file's bytes; normalize whatever shape they
+		// arrive in (ArrayBuffer, typed array, or plain array) to an ArrayBuffer
+		// for the loader.
+		function toModelArrayBuffer(data) {
+			if (data instanceof ArrayBuffer) {
+				return data;
+			}
+			if (ArrayBuffer.isView(data)) {
+				return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+			}
+			if (Array.isArray(data)) {
+				return new Uint8Array(data).buffer;
+			}
+			return null;
+		}
+
+		async function loadReferenceModel(name, data) {
+			if (!photonicScene) {
+				return;
+			}
+			const buffer = toModelArrayBuffer(data);
+			if (!buffer) {
+				showError('Could not load reference model "' + name + '": no model data arrived.');
+				return;
+			}
+			clearReferenceModel();
+			try {
+				// Photonic F13: the parsed model is adopted like any scene
+				// object. disposeOnRemove stays off so a design re-render —
+				// which clears every registered object — can re-adopt the same
+				// model instead of disposing it (see renderGeometries).
+				const handle = await photonicScene.loadModel({
+					data: buffer,
+					name: 'Reference: ' + name,
+					disposeOnRemove: false
+				});
+				referenceHandle = handle;
+				referenceName = name;
+				referenceInfo = typeof handle.getModelInfo === 'function' ? handle.getModelInfo() : null;
+				placeReferenceModel();
+				hideError();
+				statusElement.textContent = 'Status: Reference model loaded: ' + name;
+				vscode.postMessage({
+					type: 'referenceModelLoaded',
+					name,
+					format: referenceInfo ? referenceInfo.format : 'unknown',
+					meshCount: referenceInfo ? referenceInfo.meshCount : 0
+				});
+			} catch (error) {
+				console.error('Failed to load reference model:', error);
+				const message = 'Could not load reference model "' + name + '": ' + (error?.message || error);
+				showError(message);
+				vscode.postMessage({ type: 'referenceModelError', name, message });
+			}
+		}
+
+		// Put the reference on the stage the way the designed part is put
+		// there: centered across, resting on the floor. It takes the designed
+		// model's stage scale when one is on stage, so the two keep their true
+		// sizes relative to each other; on its own it gets the stage
+		// normalization. Position is measured from a cleared origin, so the
+		// call is safe to repeat when the design's scale changes.
+		function placeReferenceModel() {
+			if (!referenceHandle) {
+				return;
+			}
+			const root = referenceHandle.getMesh();
+			root.position.set(0, 0, 0);
+			root.updateMatrixWorld(true);
+			const rawBox = new THREE.Box3().setFromObject(root);
+			const rawSize = rawBox.getSize(new THREE.Vector3());
+			const currentScale = root.scale.x || 1;
+			const maxDim = (Math.max(rawSize.x, rawSize.y, rawSize.z) / currentScale) || 1;
+			const scale = currentDesignScale !== null ? currentDesignScale : LOOK.stageSize / maxDim;
+			referenceHandle.setScale(scale, scale, scale);
+			root.updateMatrixWorld(true);
+			const box = new THREE.Box3().setFromObject(root);
+			const center = box.getCenter(new THREE.Vector3());
+			referenceHandle.setPosition(-center.x, -box.min.y, -center.z);
+		}
+
+		function clearReferenceModel() {
+			if (referenceHandle && photonicScene) {
+				photonicScene.removeObject(referenceHandle);
+			}
+			referenceHandle = null;
+			referenceInfo = null;
+			referenceName = null;
+		}
+
 		function renderGeometries(geometries) {
 			// JSCAD is Z-up and Photonic is Y-up: every mesh goes into one group
 			// turned -90 degrees about X, adopted whole through Photonic's public
@@ -243,10 +342,28 @@ import { updateParameterUI } from './parameterUI.js';
 				}
 			}
 
+			// The clear below removes every registered object, the reference
+			// model included. Its root survives (it was adopted with
+			// disposeOnRemove off), so keep it and re-adopt it once the design
+			// is back; it rejoins after the bake, leaving the design's baked
+			// shading exactly as it was without a reference.
+			const referenceRoot = referenceHandle ? referenceHandle.getMesh() : null;
+			const restoreReference = () => {
+				if (referenceRoot) {
+					referenceHandle = photonicScene.addMesh(referenceRoot, {
+						name: 'Reference: ' + referenceName,
+						disposeOnRemove: false
+					});
+					placeReferenceModel();
+				}
+			};
+
 			photonicScene.clearObjects();
 
 			if (group.children.length === 0) {
 				currentBounds = null;
+				currentDesignScale = null;
+				restoreReference();
 				statusElement.textContent = 'Status: Rendered ' + geometries.length + ' object(s)';
 				return;
 			}
@@ -261,6 +378,7 @@ import { updateParameterUI } from './parameterUI.js';
 			const rawCenter = rawBox.getCenter(new THREE.Vector3());
 			const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z) || 1;
 			const scale = LOOK.stageSize / maxDim;
+			currentDesignScale = scale;
 			group.scale.setScalar(scale);
 			group.position.set(-rawCenter.x * scale, -rawBox.min.y * scale, -rawCenter.z * scale);
 
@@ -275,6 +393,8 @@ import { updateParameterUI } from './parameterUI.js';
 			} catch (error) {
 				console.error('Baked ambient occlusion failed:', error);
 			}
+
+			restoreReference();
 
 			statusElement.textContent = 'Status: Rendered ' + geometries.length + ' object(s)';
 
@@ -312,6 +432,13 @@ import { updateParameterUI } from './parameterUI.js';
 
 		snapshotButton?.addEventListener('click', captureSnapshot);
 
+		clearReferenceButton?.addEventListener('click', () => {
+			clearReferenceModel();
+			hideError();
+			statusElement.textContent = 'Status: Ready';
+			vscode.postMessage({ type: 'referenceModelCleared' });
+		});
+
 		// Message handling
 		window.addEventListener('message', (event) => {
 			const message = event.data;
@@ -322,6 +449,15 @@ import { updateParameterUI } from './parameterUI.js';
 					if (message.parameters) {
 						updateParameterUI(message.parameters, parameterPanel, parameterContent, vscode);
 					}
+					break;
+				case 'loadReferenceModel':
+					void loadReferenceModel(message.name, message.data);
+					break;
+				case 'clearReferenceModel':
+					clearReferenceModel();
+					hideError();
+					statusElement.textContent = 'Status: Ready';
+					vscode.postMessage({ type: 'referenceModelCleared' });
 					break;
 				case 'error':
 					showError(message.message);

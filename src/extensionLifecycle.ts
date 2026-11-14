@@ -5,6 +5,7 @@ import { ParameterCache } from './parameterCache';
 import { resolveJscadEntrypoint } from './jscadEngine';
 import { extractFilename } from './utilities';
 import { executeExportCommand } from './exportCommand';
+import { executeLoadReferenceModelCommand } from './referenceModelCommand';
 import { McpManager } from './mcpManager';
 import { HootcadMcpServerDefinitionProvider } from './mcpDefinitionProvider';
 
@@ -95,6 +96,18 @@ export class ExtensionLifecycle {
 		});
 		this.context.subscriptions.push(exportCommand);
 		
+		const loadReferenceModelCommand = vscode.commands.registerCommand('hootcad.loadReferenceModel', async () => {
+			this.errorReporter.logInfo('Loading reference model...');
+			await executeLoadReferenceModelCommand(this.webviewManager, this.errorReporter);
+		});
+		this.context.subscriptions.push(loadReferenceModelCommand);
+
+		const clearReferenceModelCommand = vscode.commands.registerCommand('hootcad.clearReferenceModel', async () => {
+			this.errorReporter.logInfo('Clearing reference model...');
+			this.webviewManager.clearReferenceModel();
+		});
+		this.context.subscriptions.push(clearReferenceModelCommand);
+
 		const enableMcpCommand = vscode.commands.registerCommand('hootcad.enableMcp', async () => {
 			this.errorReporter.logInfo('Enabling MCP Validation Server...');
 			await this.mcpManager.enableMcpServer();

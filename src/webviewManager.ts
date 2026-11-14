@@ -11,6 +11,8 @@ import { extractFilename, formatPreviewTitle } from './utilities';
 export class WebviewManager {
 	private currentPanel: vscode.WebviewPanel | undefined;
 	private currentEntrypoint: string | undefined;
+	private webviewReady = false;
+	private pendingReferenceModel: { name: string; data: Uint8Array } | undefined;
 	private context: vscode.ExtensionContext;
 	private errorReporter: ErrorReporter;
 	private contentProvider: WebviewContentProvider;
@@ -62,6 +64,7 @@ export class WebviewManager {
 		}
 
 		// Create new webview panel
+		this.webviewReady = false;
 		this.currentPanel = vscode.window.createWebviewPanel(
 			'hootcadPreview',
 			title,
@@ -92,6 +95,8 @@ export class WebviewManager {
 			() => {
 				this.currentPanel = undefined;
 				this.currentEntrypoint = undefined;
+				this.webviewReady = false;
+				this.pendingReferenceModel = undefined;
 				this.errorReporter.logInfo('Preview panel closed');
 			},
 			null,
@@ -111,6 +116,7 @@ export class WebviewManager {
 				vscode.window.showInformationMessage(message.text);
 				return;
 			case 'ready':
+				this.webviewReady = true;
 				this.errorReporter.logInfo('Webview is ready');
 				// Execute and render the stored entrypoint
 				if (this.currentEntrypoint) {
@@ -119,6 +125,33 @@ export class WebviewManager {
 				} else {
 					this.errorReporter.logInfo('No entrypoint stored in ready handler');
 				}
+				// A reference model picked while the panel was still opening
+				// is delivered once the first render is on its way.
+				if (this.pendingReferenceModel && this.currentPanel) {
+					const pending = this.pendingReferenceModel;
+					this.pendingReferenceModel = undefined;
+					void this.currentPanel.webview.postMessage({
+						type: 'loadReferenceModel',
+						name: pending.name,
+						data: pending.data
+					});
+				}
+				return;
+			case 'referenceModelLoaded':
+				this.errorReporter.logInfo(
+					`Reference model in preview: ${message.name} (${message.format}, ${message.meshCount} meshes)`
+				);
+				this.statusBarItem.text = `HootCAD: Reference ${message.name}`;
+				setTimeout(() => {
+					this.statusBarItem.text = "HootCAD: Ready";
+				}, 3000);
+				return;
+			case 'referenceModelError':
+				this.errorReporter.logInfo(`Reference model error: ${message.message}`);
+				vscode.window.showErrorMessage(message.message);
+				return;
+			case 'referenceModelCleared':
+				this.errorReporter.logInfo('Reference model cleared from preview');
 				return;
 			case 'parameterChanged':
 				this.errorReporter.logInfo(`Parameter changed: ${message.name} = ${message.value}`);
@@ -216,5 +249,31 @@ export class WebviewManager {
 	 */
 	isPanelOpen(): boolean {
 		return this.currentPanel !== undefined;
+	}
+
+	/**
+	 * Send a reference model file's bytes to the preview webview. When the
+	 * panel was just created and its webview has not signalled ready yet, the
+	 * model is queued and delivered by the ready handler instead.
+	 */
+	sendReferenceModel(name: string, data: Uint8Array): void {
+		if (!this.currentPanel) {
+			return;
+		}
+		if (this.webviewReady) {
+			void this.currentPanel.webview.postMessage({ type: 'loadReferenceModel', name, data });
+		} else {
+			this.pendingReferenceModel = { name, data };
+		}
+	}
+
+	/**
+	 * Ask the preview webview to remove its reference model
+	 */
+	clearReferenceModel(): void {
+		this.pendingReferenceModel = undefined;
+		if (this.currentPanel) {
+			void this.currentPanel.webview.postMessage({ type: 'clearReferenceModel' });
+		}
 	}
 }

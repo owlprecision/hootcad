@@ -27,6 +27,8 @@
   "activationEvents": [
     "onCommand:hootcad.openPreview",
     "onCommand:hootcad.export",
+    "onCommand:hootcad.loadReferenceModel",
+    "onCommand:hootcad.clearReferenceModel",
     "onCommand:hootcad.enableMcp"
   ],
   "main": "./dist/extension.js",
@@ -39,6 +41,14 @@
       {
         "command": "hootcad.export",
         "title": "HootCAD: Export"
+      },
+      {
+        "command": "hootcad.loadReferenceModel",
+        "title": "HootCAD: Load Reference Model"
+      },
+      {
+        "command": "hootcad.clearReferenceModel",
+        "title": "HootCAD: Clear Reference Model"
       },
       {
         "command": "hootcad.enableMcp",

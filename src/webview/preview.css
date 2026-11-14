@@ -48,6 +48,21 @@ h1 {
 	background-color: var(--vscode-button-hoverBackground);
 }
 
+#clear-reference-button {
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: none;
+	padding: 4px 12px;
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 12px;
+	font-family: var(--vscode-font-family);
+}
+
+#clear-reference-button:hover {
+	background-color: var(--vscode-button-hoverBackground);
+}
+
 #canvas-container {
 	flex: 1;
 	position: relative;
